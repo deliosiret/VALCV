@@ -206,20 +206,17 @@ function StarRating({ value, onChange }: { value: number; onChange: (value: numb
 
   function selectStar(event: React.MouseEvent<HTMLButtonElement>, index: number) {
     const rect = event.currentTarget.getBoundingClientRect();
-    const isHalf = event.clientX - rect.left < rect.width / 2;
+    const position = event.clientX - rect.left;
+    if (index === 0 && position <= rect.width * 0.15) {
+      onChange(0);
+      return;
+    }
+    const isHalf = position < rect.width / 2;
     onChange(index + (isHalf ? 0.5 : 1));
   }
 
   return (
-    <div className="flex min-w-[210px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`}>
-      <button
-        className="grid h-7 min-w-7 cursor-pointer place-items-center rounded-md bg-[#eef6f5] px-1.5 text-xs font-bold text-[#486366] outline-none transition hover:bg-[#d9e8e6] focus:ring-2 focus:ring-brand/20"
-        type="button"
-        onClick={() => onChange(0)}
-        title="0 puntos"
-      >
-        0
-      </button>
+    <div className="flex min-w-[178px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`}>
       {Array.from({ length: 5 }, (_, index) => {
         const fillPercent = Math.max(0, Math.min(1, boundedValue - index)) * 100;
         return (
