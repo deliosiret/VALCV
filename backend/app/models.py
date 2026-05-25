@@ -23,7 +23,23 @@ class Template(Base):
     criteria: Mapped[list["Criterion"]] = relationship(
         back_populates="template", cascade="all, delete-orphan", order_by="Criterion.order_index"
     )
+    categories: Mapped[list["TemplateCategory"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan", order_by="TemplateCategory.order_index"
+    )
     candidates: Mapped[list["Candidate"]] = relationship(back_populates="template")
+
+
+class TemplateCategory(Base):
+    __tablename__ = "template_categories"
+    __table_args__ = (UniqueConstraint("template_id", "name", name="uq_template_category_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("templates.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    weight: Mapped[float] = mapped_column(Float, default=0)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+
+    template: Mapped[Template] = relationship(back_populates="categories")
 
 
 class Criterion(Base):

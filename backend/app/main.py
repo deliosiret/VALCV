@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai import evaluate_candidate_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, User
+from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
@@ -123,6 +123,64 @@ def normalized_criteria(criteria: list[CriterionIn]) -> list[dict]:
         rows.append(row)
     return rows
 
+
+def normalized_categories(payload: TemplateCreate) -> list[dict]:
+    rows = []
+    seen = set()
+    source = payload.categories or []
+    if not source:
+        by_name: dict[str, float] = {}
+        for criterion in payload.criteria:
+            name = criterion.category.strip()
+            if name and name not in by_name:
+                by_name[name] = float(criterion.category_weight or 0)
+        source = [type("CategoryLike", (), {"name": name, "weight": weight}) for name, weight in by_name.items()]
+    for index, category in enumerate(source):
+        name = category.name.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        rows.append({"name": name, "weight": max(0.0, float(category.weight or 0)), "order_index": index})
+    return rows
+
+
+def normalized_template_parts(payload: TemplateCreate) -> tuple[list[dict], list[dict]]:
+    categories = normalized_categories(payload)
+    weights = {category["name"]: category["weight"] for category in categories}
+    criteria = []
+    counters: dict[str, int] = {}
+    for idx, criterion in enumerate(payload.criteria):
+        row = criterion.model_dump(exclude={"order_index"})
+        category = row["category"].strip()
+        counters[category] = counters.get(category, 0) + 1
+        prefix = "".join(part[:1] for part in category.split() if part).upper()[:3] or "C"
+        row["code"] = row["code"].strip() or f"{prefix}{counters[category]}"
+        row["category"] = category
+        row["aspect"] = row["aspect"].strip()
+        row["category_weight"] = weights.get(category, max(0.0, float(row["category_weight"] or 0)))
+        row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+        row["global_weight"] = row["category_weight"] * row["within_category_weight"]
+        row["order_index"] = idx
+        criteria.append(row)
+    return categories, criteria
+
+
+def sync_template_categories(db: Session):
+    templates = db.query(Template).options(selectinload(Template.criteria), selectinload(Template.categories)).all()
+    changed = False
+    for template in templates:
+        if template.categories:
+            continue
+        seen: dict[str, float] = {}
+        for criterion in template.criteria:
+            if criterion.category not in seen:
+                seen[criterion.category] = criterion.category_weight
+        for index, (name, weight) in enumerate(seen.items()):
+            template.categories.append(TemplateCategory(name=name, weight=weight, order_index=index))
+            changed = True
+    if changed:
+        db.commit()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -147,12 +205,13 @@ def startup():
     with SessionLocal() as db:
         seed_initial_template(db)
         seed_admin_user(db)
+        sync_template_categories(db)
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
     template = (
         db.query(Template)
-        .options(selectinload(Template.criteria))
+        .options(selectinload(Template.criteria), selectinload(Template.categories))
         .filter(Template.id == template_id)
         .first()
     )
@@ -308,7 +367,7 @@ def list_ai_models(_: User = Depends(get_current_user)):
 
 @app.get("/templates", response_model=list[TemplateOut])
 def list_templates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(Template).options(selectinload(Template.criteria)).order_by(Template.id).all()
+    return db.query(Template).options(selectinload(Template.criteria), selectinload(Template.categories)).order_by(Template.id).all()
 
 
 @app.post("/templates", response_model=TemplateOut)
@@ -316,7 +375,10 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_admin), d
     template = Template(name=payload.name, description=payload.description)
     db.add(template)
     db.flush()
-    for criterion in normalized_criteria(payload.criteria):
+    categories, criteria = normalized_template_parts(payload)
+    for category in categories:
+        db.add(TemplateCategory(template_id=template.id, **category))
+    for criterion in criteria:
         db.add(Criterion(template_id=template.id, **criterion))
     db.commit()
     return get_template_or_404(db, template.id)
@@ -327,9 +389,13 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
     template = get_template_or_404(db, template_id)
     template.name = payload.name
     template.description = payload.description
+    template.categories.clear()
     template.criteria.clear()
     db.flush()
-    for criterion in normalized_criteria(payload.criteria):
+    categories, criteria = normalized_template_parts(payload)
+    for category in categories:
+        template.categories.append(TemplateCategory(**category))
+    for criterion in criteria:
         template.criteria.append(Criterion(**criterion))
     db.commit()
     return get_template_or_404(db, template_id)

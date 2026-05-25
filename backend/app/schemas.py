@@ -25,9 +25,23 @@ class CriterionOut(CriterionIn):
         from_attributes = True
 
 
+class CategoryIn(BaseModel):
+    name: str
+    weight: float = 0
+    order_index: int = 0
+
+
+class CategoryOut(CategoryIn):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 class TemplateCreate(BaseModel):
     name: str
     description: str = ""
+    categories: list[CategoryIn] = Field(default_factory=list)
     criteria: list[CriterionIn] = Field(default_factory=list)
 
 
@@ -36,6 +50,7 @@ class TemplateOut(BaseModel):
     name: str
     description: str
     created_at: datetime
+    categories: list[CategoryOut] = Field(default_factory=list)
     criteria: list[CriterionOut]
 
     class Config:
