@@ -1086,12 +1086,20 @@ function App() {
                           const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
                           return (
                             <article className="grid gap-2 rounded-md border border-[#e5eeee] bg-[#f8fbfa] p-2.5" key={criterion.id}>
-                              <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_112px_210px] lg:items-center">
+                              <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto_210px] lg:items-center">
                                 <div>
                                   <strong className="block text-sm leading-tight">{criterion.aspect}</strong>
                                   <small className={mutedTextClass}>Peso interno {Math.round(criterion.within_category_weight * 100)}%</small>
                                 </div>
-                                <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateCriterion(criterion, { evaluation_mode })} />
+                                <span
+                                  className={`inline-flex min-h-7 items-center justify-center rounded-full px-2.5 text-xs font-semibold ${
+                                    criterion.evaluation_mode === "automatic"
+                                      ? "bg-[#e6f1ef] text-brand"
+                                      : "bg-[#eef2f2] text-[#486366]"
+                                  }`}
+                                >
+                                  {criterion.evaluation_mode === "automatic" ? "IA" : "Manual"}
+                                </span>
                                 <StarRating
                                   value={draftScores[criterion.id] ?? current?.score ?? 0}
                                   onChange={(score) => setDraftScores({ ...draftScores, [criterion.id]: score })}
