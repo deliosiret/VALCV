@@ -287,6 +287,8 @@ function App() {
   const [draftScores, setDraftScores] = React.useState<Record<number, number>>({});
   const [draftRationales, setDraftRationales] = React.useState<Record<number, string>>({});
   const [draftFileIds, setDraftFileIds] = React.useState<Record<number, number[]>>({});
+  const [evaluationDirty, setEvaluationDirty] = React.useState(false);
+  const [autosaveState, setAutosaveState] = React.useState<"idle" | "saving" | "saved" | "error">("idle");
   const [aiSettings, setAiSettings] = React.useState<AISettings | null>(null);
   const [aiModels, setAiModels] = React.useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -360,7 +362,33 @@ function App() {
       setDraftRationales({});
       setDraftFileIds({});
     }
+    setEvaluationDirty(false);
+    setAutosaveState("idle");
   }, [selectedCandidate?.id, selectedScoreSignature]);
+
+  React.useEffect(() => {
+    if (!evaluationDirty || !selectedCandidate || !selectedTemplate) return;
+    setAutosaveState("saving");
+    const timeout = window.setTimeout(async () => {
+      try {
+        const payload = selectedTemplate.criteria.map((criterion) => ({
+          criterion_id: criterion.id,
+          score: Number(draftScores[criterion.id] ?? selectedScores.get(criterion.id)?.score ?? 0),
+          rationale: draftRationales[criterion.id] ?? selectedScores.get(criterion.id)?.rationale ?? "",
+          file_ids: draftFileIds[criterion.id] ?? selectedScores.get(criterion.id)?.file_ids ?? [],
+        }));
+        await api(`/candidates/${selectedCandidate.id}/scores`, { method: "POST", body: JSON.stringify(payload) });
+        setEvaluationDirty(false);
+        setAutosaveState("saved");
+        setNotice("Evaluación guardada automáticamente");
+        await load();
+      } catch (error) {
+        setAutosaveState("error");
+        setNotice(error instanceof Error ? error.message : "No se pudo autoguardar");
+      }
+    }, 700);
+    return () => window.clearTimeout(timeout);
+  }, [evaluationDirty, draftScores, draftRationales, draftFileIds, selectedCandidate?.id, selectedTemplate?.id]);
 
   async function createCandidate(event: React.FormEvent) {
     event.preventDefault();
@@ -439,6 +467,11 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function markEvaluationDirty() {
+    setEvaluationDirty(true);
+    setAutosaveState("saving");
   }
 
   async function saveScores() {
@@ -1035,10 +1068,12 @@ function App() {
             <h2 className={headingClass}><Bot size={18} /> Expediente y evaluación</h2>
             {selectedCandidate ? (
               <>
-                <div className="grid items-stretch gap-2.5 border-b border-[#e5eeee] pb-3.5 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto] md:items-center">
+                <div className="grid items-stretch gap-2.5 border-b border-[#e5eeee] pb-3.5 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto] md:items-center">
                   <div>
                     <strong>{selectedCandidate.name}</strong>
-                    <span className={mutedTextClass}>{selectedCandidate.files.length} archivo(s) cargado(s)</span>
+                    <span className={mutedTextClass}>
+                      {selectedCandidate.files.length} archivo(s) cargado(s) · {autosaveState === "saving" ? "guardando..." : autosaveState === "saved" ? "guardado" : autosaveState === "error" ? "error al guardar" : "autoguardado"}
+                    </span>
                   </div>
                   <label className={buttonClass} title="Cargar PDF o imagen">
                     <FileUp size={18} />
@@ -1046,9 +1081,6 @@ function App() {
                   </label>
                   <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0} title="Evaluación automática">
                     <Bot size={18} /> IA
-                  </button>
-                  <button className={buttonClass} onClick={saveScores} disabled={busy} title="Guardar evaluación">
-                    <Save size={18} /> Guardar
                   </button>
                   <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy} title="Limpiar evaluación">
                     <RotateCcw size={18} /> Limpiar
@@ -1099,14 +1131,20 @@ function App() {
                                 </span>
                                 <StarRating
                                   value={draftScores[criterion.id] ?? current?.score ?? 0}
-                                  onChange={(score) => setDraftScores({ ...draftScores, [criterion.id]: score })}
+                                  onChange={(score) => {
+                                    setDraftScores({ ...draftScores, [criterion.id]: score });
+                                    markEvaluationDirty();
+                                  }}
                                 />
                               </div>
                               <textarea
                                 className={`${inputClass} min-h-20 resize-y text-sm`}
                                 placeholder={criterion.evaluation_mode === "manual" ? MANUAL_EVIDENCE_NOTE : criterion.notes || "Evidencia, justificación o comentario"}
                                 value={evidenceValue(criterion, current, draftRationales)}
-                                onChange={(event) => setDraftRationales({ ...draftRationales, [criterion.id]: event.target.value })}
+                                onChange={(event) => {
+                                  setDraftRationales({ ...draftRationales, [criterion.id]: event.target.value });
+                                  markEvaluationDirty();
+                                }}
                               />
                               {selectedCandidate.files.length ? (
                                 <div className="flex flex-wrap gap-1.5">
@@ -1124,13 +1162,14 @@ function App() {
                                         className="size-3.5 accent-[#16697a]"
                                         type="checkbox"
                                         checked={referencedFileIds.includes(file.id)}
-                                        onChange={() =>
+                                        onChange={() => {
                                           setDraftFileIds({
                                             ...draftFileIds,
                                             [criterion.id]: toggleFileReference(referencedFileIds, file.id),
-                                          })
-                                        }
-                                      />
+                                          });
+                                          markEvaluationDirty();
+                                        }}
+                                    />
                                       <span className="max-w-44 truncate">{file.original_name}</span>
                                     </label>
                                   ))}
