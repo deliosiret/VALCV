@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
     upload_dir: str = "./uploads"
+    admin_username: str = "admin"
+    admin_password: str = "admin123"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

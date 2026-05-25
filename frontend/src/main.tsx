@@ -7,6 +7,7 @@ import {
   FilePenLine,
   FileUp,
   Gauge,
+  LogOut,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -16,6 +17,7 @@ import {
   Star,
   Trash2,
   UserRoundPlus,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -117,10 +119,22 @@ type AISettings = {
   gemini_model: string;
 };
 
+type User = {
+  id: number;
+  username: string;
+  is_admin: boolean;
+  can_view_all: boolean;
+  is_active: boolean;
+};
+
 function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem("valcv_token");
   return fetch(`${API_URL}${path}`, {
     ...init,
-    headers: init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
+    headers:
+      init?.body instanceof FormData
+        ? { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers }
+        : { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers },
   }).then(async (response) => {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -172,7 +186,15 @@ function StarRating({ value, onChange }: { value: number; onChange: (value: numb
   }
 
   return (
-    <div className="flex min-w-[178px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`}>
+    <div className="flex min-w-[210px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`}>
+      <button
+        className="grid h-7 min-w-7 cursor-pointer place-items-center rounded-md bg-[#eef6f5] px-1.5 text-xs font-bold text-[#486366] outline-none transition hover:bg-[#d9e8e6] focus:ring-2 focus:ring-brand/20"
+        type="button"
+        onClick={() => onChange(0)}
+        title="0 puntos"
+      >
+        0
+      </button>
       {Array.from({ length: 5 }, (_, index) => {
         const fillPercent = Math.max(0, Math.min(1, boundedValue - index)) * 100;
         return (
@@ -195,6 +217,23 @@ function StarRating({ value, onChange }: { value: number; onChange: (value: numb
   );
 }
 
+function ModeToggle({ value, onChange }: { value: Mode; onChange: (value: Mode) => void }) {
+  const active = value === "automatic";
+  return (
+    <button
+      className={`flex min-h-9 w-full min-w-[92px] cursor-pointer items-center justify-between rounded-full border px-1.5 text-xs font-bold transition ${
+        active ? "border-brand bg-brand text-white" : "border-line bg-[#eef6f5] text-[#486366]"
+      }`}
+      type="button"
+      onClick={() => onChange(active ? "manual" : "automatic")}
+      title={active ? "IA activada" : "Manual"}
+    >
+      <span className="px-1.5">{active ? "IA" : "Manual"}</span>
+      <span className={`size-6 rounded-full bg-white shadow-sm ${active ? "translate-x-0" : ""}`} />
+    </button>
+  );
+}
+
 function evidenceValue(criterion: Criterion, current?: Score, draftRationales?: Record<number, string>) {
   if (draftRationales && Object.prototype.hasOwnProperty.call(draftRationales, criterion.id)) {
     return draftRationales[criterion.id];
@@ -212,6 +251,11 @@ function toggleFileReference(currentIds: number[], fileId: number) {
 }
 
 function App() {
+  const [token, setToken] = React.useState(() => localStorage.getItem("valcv_token") ?? "");
+  const [user, setUser] = React.useState<User | null>(null);
+  const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
+  const [users, setUsers] = React.useState<User[]>([]);
+  const [userForm, setUserForm] = React.useState({ username: "", password: "", is_admin: false, can_view_all: true });
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [summary, setSummary] = React.useState<SummaryCandidate[]>([]);
@@ -259,8 +303,25 @@ function App() {
   }
 
   React.useEffect(() => {
-    load().catch((error) => setNotice(error.message));
-  }, []);
+    if (!token) return;
+    api<User>("/auth/me")
+      .then((currentUser) => {
+        setUser(currentUser);
+        return load();
+      })
+      .catch((error) => {
+        localStorage.removeItem("valcv_token");
+        setToken("");
+        setUser(null);
+        setNotice(error.message);
+      });
+  }, [token]);
+
+  React.useEffect(() => {
+    if (settingsOpen && user?.is_admin) {
+      api<User[]>("/users").then(setUsers).catch((error) => setNotice(error.message));
+    }
+  }, [settingsOpen, user?.is_admin]);
 
   React.useEffect(() => {
     if (selectedCandidate) {
@@ -289,6 +350,49 @@ function App() {
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo crear");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function login(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const session = await api<{ token: string; user: User }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify(loginForm),
+      });
+      localStorage.setItem("valcv_token", session.token);
+      setToken(session.token);
+      setUser(session.user);
+      setNotice("Sesión iniciada");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo iniciar sesión");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logout() {
+    await api("/auth/logout", { method: "POST" }).catch(() => undefined);
+    localStorage.removeItem("valcv_token");
+    setToken("");
+    setUser(null);
+    setTemplates([]);
+    setCandidates([]);
+    setSummary([]);
+  }
+
+  async function createUser() {
+    setBusy(true);
+    try {
+      await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
+      setUserForm({ username: "", password: "", is_admin: false, can_view_all: true });
+      setUsers(await api<User[]>("/users"));
+      setNotice("Usuario creado");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo crear el usuario");
     } finally {
       setBusy(false);
     }
@@ -472,15 +576,15 @@ function App() {
         aspect: criterion.aspect.trim(),
         category_weight: Number(criterion.category_weight) || 0,
         within_category_weight: Number(criterion.within_category_weight) || 0,
-        global_weight: Number(criterion.global_weight) || 0,
+        global_weight: (Number(criterion.category_weight) || 0) * (Number(criterion.within_category_weight) || 0),
         scale: criterion.scale.trim() || "0 a 5",
         notes: criterion.notes.trim(),
         evaluation_mode: criterion.evaluation_mode,
         order_index: index,
       })),
     };
-    if (!payload.name || payload.criteria.some((criterion) => !criterion.code || !criterion.category || !criterion.aspect)) {
-      setNotice("Completa nombre, código, categoría y criterio antes de guardar.");
+    if (!payload.name || payload.criteria.some((criterion) => !criterion.category || !criterion.aspect)) {
+      setNotice("Completa nombre, categoría y criterio antes de guardar.");
       return;
     }
     setBusy(true);
@@ -511,6 +615,23 @@ function App() {
     fill: COLORS[candidate.id % COLORS.length],
   }));
 
+  if (!token || !user) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-app p-4 text-ink">
+        <form onSubmit={login} className="grid w-full max-w-sm gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
+          <div>
+            <p className="mb-1 text-xs font-extrabold uppercase text-accent">VALCV</p>
+            <h1 className="text-2xl font-bold">Iniciar sesión</h1>
+          </div>
+          <input className={inputClass} placeholder="Usuario" value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} required />
+          <input className={inputClass} type="password" placeholder="Contraseña" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} required />
+          <button className={buttonClass} type="submit" disabled={busy}>Entrar</button>
+          <small className={mutedTextClass}>{notice}</small>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-app text-ink">
       <header className="grid items-stretch gap-4 border-b border-line bg-white px-4 py-5 md:flex md:items-center md:justify-between md:px-7">
@@ -538,6 +659,9 @@ function App() {
           <button className={buttonClass} onClick={() => setSettingsOpen(true)} disabled={busy} title="Configuración">
             <Settings size={18} />
           </button>
+          <button className={`${buttonClass} bg-[#486366]`} onClick={logout} disabled={busy} title="Cerrar sesión">
+            <LogOut size={18} />
+          </button>
         </div>
       </header>
 
@@ -552,7 +676,7 @@ function App() {
 
       {settingsOpen ? (
         <div className="fixed inset-0 z-20 grid place-items-center bg-black/35 p-4">
-          <form onSubmit={saveAiSettings} className="w-full max-w-xl rounded-lg border border-line bg-white p-4 shadow-xl">
+          <form onSubmit={saveAiSettings} className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-line bg-white p-4 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
@@ -598,6 +722,39 @@ function App() {
                   onChange={(event) => setSettingsForm({ ...settingsForm, gemini_api_key: event.target.value })}
                 />
               </label>
+
+              {user.is_admin ? (
+                <section className="mt-2 grid gap-3 border-t border-line pt-3">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <Users size={17} /> Usuarios
+                  </h3>
+                  <div className="grid gap-2">
+                    {users.map((row) => (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
+                        <strong>{row.username}</strong>
+                        <span className={mutedTextClass}>{row.is_admin ? "Administrador" : "Usuario"} · {row.can_view_all ? "ve resultados" : "sin resultados"}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                    <input className={inputClass} placeholder="Usuario" value={userForm.username} onChange={(event) => setUserForm({ ...userForm, username: event.target.value })} />
+                    <input className={inputClass} type="password" placeholder="Contraseña" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
+                    <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
+                      <Plus size={18} /> Usuario
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <label className="inline-flex items-center gap-2">
+                      <input type="checkbox" checked={userForm.is_admin} onChange={(event) => setUserForm({ ...userForm, is_admin: event.target.checked })} />
+                      Admin
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input type="checkbox" checked={userForm.can_view_all} onChange={(event) => setUserForm({ ...userForm, can_view_all: event.target.checked })} />
+                      Ver todos los resultados
+                    </label>
+                  </div>
+                </section>
+              ) : null}
 
               <div className="flex flex-wrap justify-end gap-2 pt-2">
                 <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setSettingsOpen(false)}>
@@ -673,11 +830,7 @@ function App() {
                       </button>
                     </div>
 
-                    <div className="grid gap-2.5 md:grid-cols-[88px_minmax(170px,0.8fr)_minmax(240px,1.4fr)_130px]">
-                      <label className="grid gap-1.5 text-sm font-semibold">
-                        Código
-                        <input className={inputClass} value={criterion.code} onChange={(event) => updateTemplateCriterion(index, { code: event.target.value })} required />
-                      </label>
+                    <div className="grid gap-2.5 md:grid-cols-[minmax(170px,0.8fr)_minmax(240px,1.4fr)_130px]">
                       <label className="grid gap-1.5 text-sm font-semibold">
                         Categoría
                         <input className={inputClass} value={criterion.category} onChange={(event) => updateTemplateCriterion(index, { category: event.target.value })} required />
@@ -687,26 +840,19 @@ function App() {
                         <input className={inputClass} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(index, { aspect: event.target.value })} required />
                       </label>
                       <label className="grid gap-1.5 text-sm font-semibold">
-                        Modo
-                        <select className={inputClass} value={criterion.evaluation_mode} onChange={(event) => updateTemplateCriterion(index, { evaluation_mode: event.target.value as Mode })}>
-                          <option value="manual">Manual</option>
-                          <option value="automatic">IA</option>
-                        </select>
+                        IA
+                        <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(index, { evaluation_mode })} />
                       </label>
                     </div>
 
-                    <div className="mt-2.5 grid gap-2.5 md:grid-cols-[repeat(4,minmax(110px,1fr))]">
+                    <div className="mt-2.5 grid gap-2.5 md:grid-cols-[repeat(3,minmax(110px,1fr))]">
                       <label className="grid gap-1.5 text-sm font-semibold">
-                        Peso categoría
+                        Ponderación categoría
                         <input className={inputClass} type="number" step="0.01" value={criterion.category_weight} onChange={(event) => updateTemplateCriterion(index, { category_weight: Number(event.target.value) })} />
                       </label>
                       <label className="grid gap-1.5 text-sm font-semibold">
-                        Peso interno
+                        Ponderación dentro de categoría
                         <input className={inputClass} type="number" step="0.01" value={criterion.within_category_weight} onChange={(event) => updateTemplateCriterion(index, { within_category_weight: Number(event.target.value) })} />
-                      </label>
-                      <label className="grid gap-1.5 text-sm font-semibold">
-                        Peso global
-                        <input className={inputClass} type="number" step="0.01" value={criterion.global_weight} onChange={(event) => updateTemplateCriterion(index, { global_weight: Number(event.target.value) })} />
                       </label>
                       <label className="grid gap-1.5 text-sm font-semibold">
                         Escala
@@ -864,22 +1010,19 @@ function App() {
                 </div>
                 <div className="overflow-hidden rounded-lg border border-line">
                   <div className="hidden gap-2.5 bg-[#edf4f3] p-2.5 text-xs font-extrabold uppercase text-[#486366] xl:grid xl:grid-cols-[64px_minmax(220px,1fr)_112px_190px_minmax(220px,0.85fr)]">
-                    <span>Código</span><span>Criterio</span><span>Modo</span><span>Puntos</span><span>Evidencia</span>
+                    <span>#</span><span>Criterio</span><span>IA</span><span>Puntos</span><span>Evidencia</span>
                   </div>
                   {selectedTemplate?.criteria.map((criterion) => {
                     const current = selectedScores.get(criterion.id);
                     const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
                     return (
                       <div className="grid gap-2.5 border-t border-[#e5eeee] p-2.5 xl:grid-cols-[64px_minmax(220px,1fr)_112px_190px_minmax(220px,0.85fr)] xl:items-center" key={criterion.id}>
-                        <span className="font-extrabold text-accent">{criterion.code}</span>
+                        <span className="font-extrabold text-accent">{criterion.order_index + 1}</span>
                         <span>
                           <strong className="block text-sm leading-tight">{criterion.aspect}</strong>
                           <small className={mutedTextClass}>{criterion.category}</small>
                         </span>
-                        <select className={inputClass} value={criterion.evaluation_mode} onChange={(event) => updateCriterion(criterion, { evaluation_mode: event.target.value as Mode })}>
-                          <option value="manual">Manual</option>
-                          <option value="automatic">IA</option>
-                        </select>
+                        <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateCriterion(criterion, { evaluation_mode })} />
                         <StarRating
                           value={draftScores[criterion.id] ?? current?.score ?? 0}
                           onChange={(score) => setDraftScores({ ...draftScores, [criterion.id]: score })}

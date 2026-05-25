@@ -1,15 +1,17 @@
+import hashlib
+import secrets
 import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai import evaluate_candidate_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import AppSetting, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template
+from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, User
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
@@ -17,11 +19,15 @@ from app.schemas import (
     CandidateOut,
     CandidatePatch,
     CriterionIn,
+    LoginIn,
     ScoreIn,
     ScoreOut,
     SummaryOut,
     TemplateCreate,
     TemplateOut,
+    TokenOut,
+    UserCreate,
+    UserOut,
 )
 from app.scoring import summarize_candidate, upsert_score
 from app.seed import seed_initial_template
@@ -52,6 +58,71 @@ def clean_file_ids(raw_file_ids, valid_file_ids: set[int]) -> list[int]:
             cleaned.append(file_id)
     return list(dict.fromkeys(cleaned))
 
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 150_000).hex()
+    return f"pbkdf2_sha256${salt}${digest}"
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        _, salt, digest = password_hash.split("$", 2)
+    except ValueError:
+        return False
+    return secrets.compare_digest(hash_password(password, salt), f"pbkdf2_sha256${salt}${digest}")
+
+
+def get_current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Inicia sesión para continuar.")
+    token = authorization.removeprefix("Bearer ").strip()
+    session = db.query(AuthSession).options(selectinload(AuthSession.user)).filter(AuthSession.token == token).first()
+    if not session or not session.user.is_active:
+        raise HTTPException(status_code=401, detail="Sesión inválida o vencida.")
+    return session.user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo un usuario administrador puede realizar esta acción.")
+    return user
+
+
+def seed_admin_user(db: Session):
+    exists = db.query(User).filter(User.username == settings.admin_username).first()
+    if exists:
+        return
+    db.add(
+        User(
+            username=settings.admin_username,
+            password_hash=hash_password(settings.admin_password),
+            is_admin=True,
+            can_view_all=True,
+            is_active=True,
+        )
+    )
+    db.commit()
+
+
+def normalized_criteria(criteria: list[CriterionIn]) -> list[dict]:
+    rows = []
+    counters: dict[str, int] = {}
+    for idx, criterion in enumerate(criteria):
+        row = criterion.model_dump(exclude={"order_index"})
+        category = row["category"].strip()
+        counters[category] = counters.get(category, 0) + 1
+        prefix = "".join(part[:1] for part in category.split() if part).upper()[:3] or "C"
+        row["code"] = row["code"].strip() or f"{prefix}{counters[category]}"
+        row["category"] = category
+        row["aspect"] = row["aspect"].strip()
+        row["category_weight"] = max(0.0, float(row["category_weight"] or 0))
+        row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+        row["global_weight"] = row["category_weight"] * row["within_category_weight"]
+        row["order_index"] = idx
+        rows.append(row)
+    return rows
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,6 +146,7 @@ def startup():
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed_initial_template(db)
+        seed_admin_user(db)
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
@@ -150,8 +222,60 @@ def health():
     return {"ok": True}
 
 
+@app.post("/auth/login", response_model=TokenOut)
+def login(payload: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == payload.username.strip()).first()
+    if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Usuario o contraseña inválidos.")
+    token = secrets.token_urlsafe(42)
+    db.add(AuthSession(token=token, user_id=user.id))
+    db.commit()
+    return {"token": token, "user": user}
+
+
+@app.get("/auth/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)):
+    return user
+
+
+@app.post("/auth/logout")
+def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        session = db.query(AuthSession).filter(AuthSession.token == token).first()
+        if session:
+            db.delete(session)
+            db.commit()
+    return {"ok": True}
+
+
+@app.get("/users", response_model=list[UserOut])
+def list_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return db.query(User).order_by(User.username).all()
+
+
+@app.post("/users", response_model=UserOut)
+def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    username = payload.username.strip()
+    if not username or len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Usuario requerido y contraseña mínima de 6 caracteres.")
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=400, detail="Ya existe un usuario con ese nombre.")
+    user = User(
+        username=username,
+        password_hash=hash_password(payload.password),
+        is_admin=payload.is_admin,
+        can_view_all=payload.can_view_all,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @app.get("/settings/ai", response_model=AISettingsOut)
-def read_ai_settings(db: Session = Depends(get_db)):
+def read_ai_settings(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     api_key, model = get_ai_config(db)
     return {
         "gemini_api_key_configured": bool(api_key),
@@ -161,7 +285,7 @@ def read_ai_settings(db: Session = Depends(get_db)):
 
 
 @app.put("/settings/ai", response_model=AISettingsOut)
-def save_ai_settings(payload: AISettingsIn, db: Session = Depends(get_db)):
+def save_ai_settings(payload: AISettingsIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     model = payload.gemini_model.strip()
     if not model:
         raise HTTPException(status_code=400, detail="Selecciona un modelo de Gemini.")
@@ -178,52 +302,61 @@ def save_ai_settings(payload: AISettingsIn, db: Session = Depends(get_db)):
 
 
 @app.get("/settings/ai/models", response_model=list[str])
-def list_ai_models():
+def list_ai_models(_: User = Depends(get_current_user)):
     return AI_MODEL_OPTIONS
 
 
 @app.get("/templates", response_model=list[TemplateOut])
-def list_templates(db: Session = Depends(get_db)):
+def list_templates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return db.query(Template).options(selectinload(Template.criteria)).order_by(Template.id).all()
 
 
 @app.post("/templates", response_model=TemplateOut)
-def create_template(payload: TemplateCreate, db: Session = Depends(get_db)):
+def create_template(payload: TemplateCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     template = Template(name=payload.name, description=payload.description)
     db.add(template)
     db.flush()
-    for idx, criterion in enumerate(payload.criteria):
-        db.add(Criterion(template_id=template.id, order_index=idx, **criterion.model_dump(exclude={"order_index"})))
+    for criterion in normalized_criteria(payload.criteria):
+        db.add(Criterion(template_id=template.id, **criterion))
     db.commit()
     return get_template_or_404(db, template.id)
 
 
 @app.put("/templates/{template_id}", response_model=TemplateOut)
-def replace_template(template_id: int, payload: TemplateCreate, db: Session = Depends(get_db)):
+def replace_template(template_id: int, payload: TemplateCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     template = get_template_or_404(db, template_id)
     template.name = payload.name
     template.description = payload.description
     template.criteria.clear()
     db.flush()
-    for idx, criterion in enumerate(payload.criteria):
-        template.criteria.append(Criterion(order_index=idx, **criterion.model_dump(exclude={"order_index"})))
+    for criterion in normalized_criteria(payload.criteria):
+        template.criteria.append(Criterion(**criterion))
     db.commit()
     return get_template_or_404(db, template_id)
 
 
 @app.patch("/criteria/{criterion_id}", response_model=TemplateOut)
-def update_criterion(criterion_id: int, payload: CriterionIn, db: Session = Depends(get_db)):
+def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
     if not criterion:
         raise HTTPException(status_code=404, detail="Criterio no encontrado")
-    for key, value in payload.model_dump().items():
+    row = payload.model_dump()
+    row["code"] = row["code"].strip() or criterion.code
+    row["category"] = row["category"].strip()
+    row["aspect"] = row["aspect"].strip()
+    row["category_weight"] = max(0.0, float(row["category_weight"] or 0))
+    row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+    row["global_weight"] = row["category_weight"] * row["within_category_weight"]
+    for key, value in row.items():
         setattr(criterion, key, value)
     db.commit()
     return get_template_or_404(db, criterion.template_id)
 
 
 @app.get("/candidates", response_model=list[CandidateOut])
-def list_candidates(db: Session = Depends(get_db)):
+def list_candidates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user.can_view_all:
+        raise HTTPException(status_code=403, detail="Este usuario no puede ver resultados.")
     return (
         db.query(Candidate)
         .options(selectinload(Candidate.files), selectinload(Candidate.scores).selectinload(Score.file_references))
@@ -233,7 +366,7 @@ def list_candidates(db: Session = Depends(get_db)):
 
 
 @app.post("/candidates", response_model=CandidateOut)
-def create_candidate(payload: CandidateCreate, db: Session = Depends(get_db)):
+def create_candidate(payload: CandidateCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     get_template_or_404(db, payload.template_id)
     candidate = Candidate(**payload.model_dump())
     db.add(candidate)
@@ -242,7 +375,7 @@ def create_candidate(payload: CandidateCreate, db: Session = Depends(get_db)):
 
 
 @app.patch("/candidates/{candidate_id}", response_model=CandidateOut)
-def update_candidate(candidate_id: int, payload: CandidatePatch, db: Session = Depends(get_db)):
+def update_candidate(candidate_id: int, payload: CandidatePatch, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(candidate, key, value)
@@ -251,7 +384,7 @@ def update_candidate(candidate_id: int, payload: CandidatePatch, db: Session = D
 
 
 @app.delete("/candidates/{candidate_id}")
-def delete_candidate(candidate_id: int, db: Session = Depends(get_db)):
+def delete_candidate(candidate_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     delete_uploaded_files(candidate.files)
     db.delete(candidate)
@@ -260,7 +393,7 @@ def delete_candidate(candidate_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/candidates/{candidate_id}/reset", response_model=CandidateOut)
-def reset_candidate_evaluation(candidate_id: int, db: Session = Depends(get_db)):
+def reset_candidate_evaluation(candidate_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     delete_uploaded_files(candidate.files)
     candidate.files.clear()
@@ -270,7 +403,7 @@ def reset_candidate_evaluation(candidate_id: int, db: Session = Depends(get_db))
 
 
 @app.post("/candidates/{candidate_id}/files", response_model=CandidateOut)
-def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
+def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     allowed = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
     upload_path = Path(settings.upload_dir)
@@ -299,7 +432,7 @@ def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...
 
 
 @app.delete("/candidates/{candidate_id}/files/{file_id}", response_model=CandidateOut)
-def delete_candidate_file(candidate_id: int, file_id: int, db: Session = Depends(get_db)):
+def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate_file = get_candidate_file_or_404(db, candidate_id, file_id)
     delete_uploaded_files([candidate_file])
     db.delete(candidate_file)
@@ -308,7 +441,7 @@ def delete_candidate_file(candidate_id: int, file_id: int, db: Session = Depends
 
 
 @app.post("/candidates/{candidate_id}/scores", response_model=list[ScoreOut])
-def save_scores(candidate_id: int, payload: list[ScoreIn], db: Session = Depends(get_db)):
+def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
     for item in payload:
@@ -323,7 +456,7 @@ def save_scores(candidate_id: int, payload: list[ScoreIn], db: Session = Depends
 
 
 @app.post("/candidates/{candidate_id}/evaluate-ai", response_model=CandidateOut)
-def evaluate_ai(candidate_id: int, db: Session = Depends(get_db)):
+def evaluate_ai(candidate_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
@@ -350,7 +483,9 @@ def evaluate_ai(candidate_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/summary", response_model=SummaryOut)
-def summary(template_id: int | None = None, db: Session = Depends(get_db)):
+def summary(template_id: int | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user.can_view_all:
+        raise HTTPException(status_code=403, detail="Este usuario no puede ver resultados.")
     query = db.query(Candidate).options(selectinload(Candidate.scores))
     if template_id:
         query = query.filter(Candidate.template_id == template_id)

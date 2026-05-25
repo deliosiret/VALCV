@@ -15,10 +15,13 @@ El frontend en Docker llama a la API por la ruta relativa `/api`, servida por el
 ```bash
 cp .env.example .env
 # edita GEMINI_API_KEY si usarás evaluación automática
+# cambia ADMIN_PASSWORD antes de exponer la app
 docker compose up --build
 ```
 
 La primera plantilla se inicializa con los criterios del archivo `evaluacion_aspirantes_gerente_normas_electricas (1).xlsx`.
+
+El usuario inicial por defecto es `admin` con contraseña `admin123`. Cámbiala en `.env` antes del primer arranque en producción.
 
 Si cambias el frontend y lo sirves detrás de Nginx Proxy Manager, reconstruye el servicio web para evitar mezclar JS nuevo con CSS viejo:
 

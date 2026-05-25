@@ -6,7 +6,7 @@ from app.models import EvaluationMode
 
 
 class CriterionIn(BaseModel):
-    code: str
+    code: str = ""
     category: str
     aspect: str
     category_weight: float = 0
@@ -127,3 +127,31 @@ class AISettingsOut(BaseModel):
     gemini_api_key_configured: bool
     gemini_api_key_masked: str = ""
     gemini_model: str
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
+    can_view_all: bool = True
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    is_admin: bool
+    can_view_all: bool
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class TokenOut(BaseModel):
+    token: str
+    user: UserOut
