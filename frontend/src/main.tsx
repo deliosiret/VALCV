@@ -263,8 +263,8 @@ function ModeToggle({ value, onChange }: { value: Mode; onChange: (value: Mode) 
       onClick={() => onChange(active ? "manual" : "automatic")}
       title={active ? "Evaluación con AI" : "Evaluación manual"}
     >
-      <span className={`grid size-6 place-items-center rounded-full shadow-sm transition ${active ? "translate-x-5 bg-white text-brand" : "translate-x-0 bg-white text-[#486366]"}`}>
-        {active ? "AI" : ""}
+      <span className={`grid size-6 place-items-center rounded-full bg-white shadow-sm transition ${active ? "translate-x-5 text-brand" : "translate-x-0 text-[#8aa0a1]"}`}>
+        AI
       </span>
     </button>
   );
