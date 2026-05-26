@@ -967,10 +967,14 @@ function App() {
                     .map((criterion, criterionIndex) => ({ criterion, criterionIndex }))
                     .filter((row) => row.criterion.category === category.name);
                   return (
-                    <div className="rounded-lg border border-line bg-[#f8fbfa] p-3" key={`${category.id ?? "cat"}-${categoryIndex}`}>
-                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
-                        <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(categoryIndex, { name: event.target.value })} />
+                    <div className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={`${category.id ?? "cat"}-${categoryIndex}`}>
+                      <div className="grid gap-2 border-b border-[#cfe0df] bg-[#e6f1ef] p-3 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
+                        <label className="grid gap-1">
+                          <span className="text-[11px] font-extrabold uppercase tracking-normal text-brand">Categoría {categoryIndex + 1}</span>
+                          <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(categoryIndex, { name: event.target.value })} />
+                        </label>
                         <label className="relative">
+                          <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-normal text-brand">Peso</span>
                           <input
                             className={`${inputClass} pr-7`}
                             type="number"
@@ -991,9 +995,9 @@ function App() {
                         </button>
                       </div>
 
-                      <div className="mt-3 grid gap-2">
+                      <div className="grid gap-2 bg-[#fbfdfc] p-3">
                         {childCriteria.length ? childCriteria.map(({ criterion, criterionIndex }) => (
-                          <div className="rounded-md border border-[#e5eeee] bg-white p-2.5" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
+                          <div className="rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
                             <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_64px_36px] md:items-center">
                               <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
                               <label className="relative">
@@ -1190,24 +1194,28 @@ function App() {
                     </span>
                   ))}
                 </div>
-                <div className="grid gap-3">
-                  {criteriaGroups.map((group) => (
-                    <section className="rounded-lg border border-line bg-white" key={group.category}>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e5eeee] bg-[#edf4f3] px-3 py-2">
-                        <strong className="text-sm text-[#25464a]">{group.category}</strong>
-                        <span className={mutedTextClass}>{group.criteria.length} criterio(s)</span>
+                <div className="grid gap-4">
+                  {criteriaGroups.map((group, groupIndex) => (
+                    <section className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={group.category}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#cfe0df] bg-[#dcecea] px-3 py-2.5">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-brand text-xs font-extrabold text-white">{groupIndex + 1}</span>
+                          <strong className="min-w-0 text-sm leading-tight text-[#25464a]">{group.category}</strong>
+                        </div>
+                        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#486366]">{group.criteria.length} criterio(s)</span>
                       </div>
-                      <div className="grid gap-2 p-2.5">
-                        {group.criteria.map((criterion) => {
+                      <div className="grid gap-2.5 bg-[#fbfdfc] p-2.5 md:p-3">
+                        {group.criteria.map((criterion, criterionIndex) => {
                           const current = selectedScores.get(criterion.id);
                           const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
                           const isAutomatic = criterion.evaluation_mode === "automatic";
                           const isAiLocked = isAutomatic && selectedTemplate?.ai_evaluation_locked !== false;
                           return (
-                            <article className="grid gap-2 rounded-md border border-[#e5eeee] bg-[#f8fbfa] p-2.5" key={criterion.id}>
+                            <article className="grid gap-2 rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={criterion.id}>
                               <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_210px] lg:items-center">
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                    <span className="shrink-0 rounded bg-[#f4e8de] px-1.5 py-0.5 text-[10px] font-extrabold text-[#9a3412]">{groupIndex + 1}.{criterionIndex + 1}</span>
                                     <strong className="min-w-0 text-sm leading-tight">{criterion.aspect}</strong>
                                     {isAutomatic ? (
                                       <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#e6f1ef] px-1.5 text-[10px] font-bold leading-none text-brand">
