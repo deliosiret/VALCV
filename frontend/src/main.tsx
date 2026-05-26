@@ -256,15 +256,16 @@ function ModeToggle({ value, onChange }: { value: Mode; onChange: (value: Mode) 
   const active = value === "automatic";
   return (
     <button
-      className={`flex min-h-9 w-full min-w-[92px] cursor-pointer items-center justify-between rounded-full border px-1.5 text-xs font-bold transition ${
+      className={`flex min-h-8 w-14 cursor-pointer items-center rounded-full border p-1 text-[11px] font-bold transition ${
         active ? "border-brand bg-brand text-white" : "border-line bg-[#eef6f5] text-[#486366]"
       }`}
       type="button"
       onClick={() => onChange(active ? "manual" : "automatic")}
-      title={active ? "IA activada" : "Manual"}
+      title={active ? "Evaluación con AI" : "Evaluación manual"}
     >
-      <span className="px-1.5">{active ? "IA" : "Manual"}</span>
-      <span className={`size-6 rounded-full bg-white shadow-sm ${active ? "translate-x-0" : ""}`} />
+      <span className={`grid size-6 place-items-center rounded-full shadow-sm transition ${active ? "translate-x-5 bg-white text-brand" : "translate-x-0 bg-white text-[#486366]"}`}>
+        {active ? "AI" : ""}
+      </span>
     </button>
   );
 }
@@ -970,7 +971,7 @@ function App() {
                       <div className="mt-3 grid gap-2">
                         {childCriteria.length ? childCriteria.map(({ criterion, criterionIndex }) => (
                           <div className="rounded-md border border-[#e5eeee] bg-white p-2.5" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
-                            <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_130px_36px] md:items-center">
+                            <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_64px_36px] md:items-center">
                               <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
                               <label className="relative">
                                 <input
