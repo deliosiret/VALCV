@@ -14,6 +14,7 @@ class CriterionIn(BaseModel):
     global_weight: float = 0
     scale: str = "0 a 5"
     notes: str = ""
+    is_critical: bool = False
     evaluation_mode: EvaluationMode = EvaluationMode.manual
     order_index: int = 0
 

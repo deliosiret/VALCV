@@ -94,6 +94,7 @@ type Criterion = {
   global_weight: number;
   scale: string;
   notes: string;
+  is_critical: boolean;
   evaluation_mode: Mode;
   order_index: number;
 };
@@ -200,6 +201,7 @@ function blankCriterion(orderIndex = 0): CriterionDraft {
     global_weight: 0,
     scale: "0 a 5",
     notes: "",
+    is_critical: false,
     evaluation_mode: "manual",
     order_index: orderIndex,
   };
@@ -322,6 +324,59 @@ function ModeToggle({ value, onChange }: { value: Mode; onChange: (value: Mode) 
         AI
       </span>
     </button>
+  );
+}
+
+function CriticalToggle({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button
+      className={`flex min-h-8 w-full cursor-pointer items-center justify-center rounded-full border px-2 text-[11px] font-bold transition ${
+        value ? "border-[#9a3412] bg-[#fff7ed] text-[#9a3412]" : "border-line bg-[#eef6f5] text-[#667579]"
+      }`}
+      type="button"
+      onClick={() => onChange(!value)}
+      title={value ? "Criterio crítico activado" : "Marcar como criterio crítico"}
+    >
+      {value ? "Crítico" : "Normal"}
+    </button>
+  );
+}
+
+function PassFailRating({
+  value,
+  onChange,
+  disabled = false,
+  title,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  const passed = value >= 5;
+  return (
+    <div className="grid min-w-[178px] grid-cols-2 gap-1" title={title}>
+      <button
+        className={`min-h-8 rounded-md border px-2 text-xs font-bold ${
+          passed ? "border-brand bg-[#e6f1ef] text-brand" : "border-line bg-white text-[#486366]"
+        } disabled:cursor-not-allowed disabled:opacity-70`}
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(5)}
+      >
+        Cumple
+      </button>
+      <button
+        className={`min-h-8 rounded-md border px-2 text-xs font-bold ${
+          !passed ? "border-[#9a3412] bg-[#fff7ed] text-[#9a3412]" : "border-line bg-white text-[#486366]"
+        } disabled:cursor-not-allowed disabled:opacity-70`}
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(0)}
+      >
+        No cumple
+      </button>
+    </div>
   );
 }
 
@@ -815,6 +870,7 @@ function App() {
         global_weight: (categoryWeights.get(criterion.category.trim()) ?? 0) * (Number(criterion.within_category_weight) || 0),
         scale: criterion.scale.trim() || "0 a 5",
         notes: criterion.notes.trim(),
+        is_critical: criterion.is_critical,
         evaluation_mode: criterion.evaluation_mode,
         order_index: index,
       })),
@@ -1129,7 +1185,7 @@ function App() {
                         </div>
                         {childCriteria.length ? childCriteria.map(({ criterion, criterionIndex }) => (
                           <div className="rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
-                            <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_64px_36px] md:items-center">
+                            <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_72px_64px_36px] md:items-center">
                               <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
                               <label className="relative">
                                 <input
@@ -1150,6 +1206,7 @@ function App() {
                                   ) - (Number(criterion.within_category_weight) || 0)))}%
                                 </small>
                               </label>
+                              <CriticalToggle value={criterion.is_critical} onChange={(is_critical) => updateTemplateCriterion(criterionIndex, { is_critical })} />
                               <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(criterionIndex, { evaluation_mode })} />
                               <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(criterionIndex)} title="Eliminar criterio">
                                 <Trash2 size={16} />
@@ -1347,8 +1404,9 @@ function App() {
                           const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
                           const isAutomatic = criterion.evaluation_mode === "automatic";
                           const isAiLocked = isAutomatic && selectedTemplate?.ai_evaluation_locked !== false;
+                          const currentScore = draftScores[criterion.id] ?? current?.score ?? 0;
                           return (
-                            <article className="grid gap-2 rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={criterion.id}>
+                            <article className={`grid gap-2 rounded-md border border-[#e5eeee] border-l-4 bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)] ${criterion.is_critical ? "border-l-[#9a3412]" : "border-l-[#db6400]"}`} key={criterion.id}>
                               <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_210px] lg:items-center">
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -1359,18 +1417,37 @@ function App() {
                                         AI
                                       </span>
                                     ) : null}
+                                    {criterion.is_critical ? (
+                                      <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#fff7ed] px-1.5 text-[10px] font-bold leading-none text-[#9a3412]" title="Si este criterio no cumple, el score general queda en 0.">
+                                        Crítico
+                                      </span>
+                                    ) : null}
                                   </div>
-                                  <small className={mutedTextClass}>Peso interno {Math.round(criterion.within_category_weight * 100)}%</small>
+                                  <small className={mutedTextClass}>
+                                    {criterion.is_critical ? "Cumple / no cumple" : `Peso interno ${Math.round(criterion.within_category_weight * 100)}%`}
+                                  </small>
                                 </div>
-                                <StarRating
-                                  value={draftScores[criterion.id] ?? current?.score ?? 0}
-                                  disabled={isAiLocked}
-                                  title={isAiLocked ? aiLockedTitle : undefined}
-                                  onChange={(score) => {
-                                    setDraftScores({ ...draftScores, [criterion.id]: score });
-                                    markEvaluationDirty();
-                                  }}
-                                />
+                                {criterion.is_critical ? (
+                                  <PassFailRating
+                                    value={currentScore}
+                                    disabled={isAiLocked}
+                                    title={isAiLocked ? aiLockedTitle : "Criterio crítico: no cumplirlo deja el score general en 0."}
+                                    onChange={(score) => {
+                                      setDraftScores({ ...draftScores, [criterion.id]: score });
+                                      markEvaluationDirty();
+                                    }}
+                                  />
+                                ) : (
+                                  <StarRating
+                                    value={currentScore}
+                                    disabled={isAiLocked}
+                                    title={isAiLocked ? aiLockedTitle : undefined}
+                                    onChange={(score) => {
+                                      setDraftScores({ ...draftScores, [criterion.id]: score });
+                                      markEvaluationDirty();
+                                    }}
+                                  />
+                                )}
                               </div>
                               <textarea
                                 className={`${inputClass} min-h-20 resize-y text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2] disabled:text-[#486366]`}

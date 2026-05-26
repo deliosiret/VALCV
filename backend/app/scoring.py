@@ -15,6 +15,11 @@ def recommendation(global_score: float) -> str:
 
 def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict:
     score_by_criterion = {score.criterion_id: score.score for score in candidate.scores}
+    failed_critical = [
+        criterion
+        for criterion in criteria
+        if criterion.is_critical and score_by_criterion.get(criterion.id, 0.0) < 5.0
+    ]
     category_weight = {}
     category_points = defaultdict(float)
     category_max = defaultdict(float)
@@ -34,14 +39,14 @@ def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict
         category: round((category_points[category] / max(weight, 0.00001)), 4)
         for category, weight in category_max.items()
     }
-    normalized_global = global_score / max(total_global_weight, 0.00001)
+    normalized_global = 0.0 if failed_critical else global_score / max(total_global_weight, 0.00001)
 
     return {
         "id": candidate.id,
         "name": candidate.name,
         "document_id": candidate.document_id,
         "global_score": round(normalized_global, 4),
-        "recommendation": recommendation(normalized_global),
+        "recommendation": "No califica por criterio crítico" if failed_critical else recommendation(normalized_global),
         "categories": categories,
     }
 

@@ -56,6 +56,7 @@ class Criterion(Base):
     global_weight: Mapped[float] = mapped_column(Float)
     scale: Mapped[str] = mapped_column(String(40), default="0 a 5")
     notes: Mapped[str] = mapped_column(Text, default="")
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
     evaluation_mode: Mapped[EvaluationMode] = mapped_column(
         SAEnum(EvaluationMode, name="evaluation_mode"), default=EvaluationMode.manual
     )

@@ -220,6 +220,10 @@ def ensure_schema():
     if "ai_evaluation_locked" not in template_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE templates ADD COLUMN ai_evaluation_locked BOOLEAN NOT NULL DEFAULT TRUE"))
+    criterion_columns = {column["name"] for column in inspector.get_columns("criteria")}
+    if "is_critical" not in criterion_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE criteria ADD COLUMN is_critical BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:

@@ -41,6 +41,7 @@ def evaluate_candidate_with_gemini(
             "aspect": criterion.aspect,
             "scale": criterion.scale,
             "notes": criterion.notes,
+            "is_critical": criterion.is_critical,
         }
         for criterion in criteria
     ]
@@ -51,6 +52,9 @@ def evaluate_candidate_with_gemini(
         "En file_ids incluye el id de cada documento usado como referencia para ese criterio; si no usaste evidencia documental, usa []. "
         "La puntuación va de 0 a 5: 5 excelente, 4 muy bueno, 3 aceptable, "
         "2 débil, 1 deficiente, 0 no evidenciado. Si no hay evidencia documental, usa 0 o 1. "
+        "Si is_critical es true, evalúa el criterio como cumple/no cumple: usa score 5 solamente si cumple plenamente "
+        "el requisito excluyente, y score 0 si no cumple, no está evidenciado o solo cumple parcialmente. "
+        "Usa notes como instrucciones específicas de evaluación para cada criterio. "
         f"Candidato: {candidate.name}. Criterios automáticos: {json.dumps(rubric, ensure_ascii=False)}"
     )
 
