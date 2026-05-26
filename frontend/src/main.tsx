@@ -84,6 +84,7 @@ type Template = {
   id: number;
   name: string;
   description: string;
+  ai_evaluation_locked: boolean;
   categories: TemplateCategory[];
   criteria: Criterion[];
 };
@@ -101,6 +102,7 @@ type TemplateDraft = {
   id?: number;
   name: string;
   description: string;
+  ai_evaluation_locked: boolean;
   categories: TemplateCategory[];
   criteria: CriterionDraft[];
 };
@@ -205,6 +207,7 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
     id: duplicate ? undefined : template.id,
     name: duplicate ? `Copia de ${template.name}` : template.name,
     description: template.description,
+    ai_evaluation_locked: template.ai_evaluation_locked ?? true,
     categories: categoriesFromTemplate(template),
     criteria: template.criteria.map((criterion, index) => ({
       ...criterion,
@@ -214,10 +217,11 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
   };
 }
 
-function StarRating({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+function StarRating({ value, onChange, disabled = false }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
   const boundedValue = Math.max(0, Math.min(5, Number(value) || 0));
 
   function selectStar(event: React.MouseEvent<HTMLButtonElement>, index: number) {
+    if (disabled) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const position = event.clientX - rect.left;
     if (index === 0 && position <= rect.width * 0.15) {
@@ -234,9 +238,10 @@ function StarRating({ value, onChange }: { value: number; onChange: (value: numb
         const fillPercent = Math.max(0, Math.min(1, boundedValue - index)) * 100;
         return (
           <button
-            className="relative grid size-7 cursor-pointer place-items-center rounded-md text-[#c7d1d2] outline-none transition hover:bg-[#eef6f5] focus:ring-2 focus:ring-brand/20"
+            className="relative grid size-7 cursor-pointer place-items-center rounded-md text-[#c7d1d2] outline-none transition hover:bg-[#eef6f5] focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-transparent"
             key={index}
             type="button"
+            disabled={disabled}
             onClick={(event) => selectStar(event, index)}
             title={`${index + 0.5} o ${index + 1} puntos`}
           >
@@ -311,6 +316,7 @@ function App() {
   const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>({
     name: "",
     description: "",
+    ai_evaluation_locked: true,
     categories: [blankCategory()],
     criteria: [],
   });
@@ -609,7 +615,7 @@ function App() {
 
   function openTemplateEditor(action: "new" | "edit" | "duplicate") {
     if (action === "new" || !selectedTemplate) {
-      setTemplateDraft({ name: "", description: "", categories: [blankCategory()], criteria: [] });
+      setTemplateDraft({ name: "", description: "", ai_evaluation_locked: true, categories: [blankCategory()], criteria: [] });
     } else {
       setTemplateDraft(toTemplateDraft(selectedTemplate, action === "duplicate"));
     }
@@ -683,6 +689,7 @@ function App() {
     const payload = {
       name: templateDraft.name.trim(),
       description: templateDraft.description.trim(),
+      ai_evaluation_locked: templateDraft.ai_evaluation_locked,
       categories: templateDraft.categories.map((category, index) => ({
         name: category.name.trim(),
         weight: Number(category.weight) || 0,
@@ -932,6 +939,16 @@ function App() {
                 </label>
               </div>
 
+              <label className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-line bg-[#f8fbfa] px-3 py-2 text-sm font-semibold text-[#25464a]">
+                <input
+                  className="size-4 accent-[#16697a]"
+                  type="checkbox"
+                  checked={templateDraft.ai_evaluation_locked}
+                  onChange={(event) => setTemplateDraft({ ...templateDraft, ai_evaluation_locked: event.target.checked })}
+                />
+                Bloquear edición manual de puntuación, evidencia y documentos en criterios AI
+              </label>
+
               <section className="grid gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-ink">Categorías y criterios</h3>
@@ -1167,24 +1184,25 @@ function App() {
                         {group.criteria.map((criterion) => {
                           const current = selectedScores.get(criterion.id);
                           const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
+                          const isAutomatic = criterion.evaluation_mode === "automatic";
+                          const isAiLocked = isAutomatic && selectedTemplate?.ai_evaluation_locked !== false;
                           return (
                             <article className="grid gap-2 rounded-md border border-[#e5eeee] bg-[#f8fbfa] p-2.5" key={criterion.id}>
-                              <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto_210px] lg:items-center">
-                                <div>
-                                  <strong className="block text-sm leading-tight">{criterion.aspect}</strong>
+                              <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_210px] lg:items-center">
+                                <div className="min-w-0">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                    <strong className="min-w-0 text-sm leading-tight">{criterion.aspect}</strong>
+                                    {isAutomatic ? (
+                                      <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#e6f1ef] px-1.5 text-[10px] font-bold leading-none text-brand">
+                                        AI
+                                      </span>
+                                    ) : null}
+                                  </div>
                                   <small className={mutedTextClass}>Peso interno {Math.round(criterion.within_category_weight * 100)}%</small>
                                 </div>
-                                <span
-                                  className={`inline-flex min-h-7 items-center justify-center rounded-full px-2.5 text-xs font-semibold ${
-                                    criterion.evaluation_mode === "automatic"
-                                      ? "bg-[#e6f1ef] text-brand"
-                                      : "bg-[#eef2f2] text-[#486366]"
-                                  }`}
-                                >
-                                  {criterion.evaluation_mode === "automatic" ? "IA" : "Manual"}
-                                </span>
                                 <StarRating
                                   value={draftScores[criterion.id] ?? current?.score ?? 0}
+                                  disabled={isAiLocked}
                                   onChange={(score) => {
                                     setDraftScores({ ...draftScores, [criterion.id]: score });
                                     markEvaluationDirty();
@@ -1192,7 +1210,8 @@ function App() {
                                 />
                               </div>
                               <textarea
-                                className={`${inputClass} min-h-20 resize-y text-sm`}
+                                className={`${inputClass} min-h-20 resize-y text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2] disabled:text-[#486366]`}
+                                disabled={isAiLocked}
                                 placeholder={criterion.evaluation_mode === "manual" ? MANUAL_EVIDENCE_NOTE : criterion.notes || "Evidencia, justificación o comentario"}
                                 value={evidenceValue(criterion, current, draftRationales)}
                                 onChange={(event) => {
@@ -1215,6 +1234,7 @@ function App() {
                                       <input
                                         className="size-3.5 accent-[#16697a]"
                                         type="checkbox"
+                                        disabled={isAiLocked}
                                         checked={referencedFileIds.includes(file.id)}
                                         onChange={() => {
                                           setDraftFileIds({

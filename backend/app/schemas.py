@@ -41,6 +41,7 @@ class CategoryOut(CategoryIn):
 class TemplateCreate(BaseModel):
     name: str
     description: str = ""
+    ai_evaluation_locked: bool = True
     categories: list[CategoryIn] = Field(default_factory=list)
     criteria: list[CriterionIn] = Field(default_factory=list)
 
@@ -49,6 +50,7 @@ class TemplateOut(BaseModel):
     id: int
     name: str
     description: str
+    ai_evaluation_locked: bool = True
     created_at: datetime
     categories: list[CategoryOut] = Field(default_factory=list)
     criteria: list[CriterionOut]

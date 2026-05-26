@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai import evaluate_candidate_with_gemini
@@ -202,10 +203,19 @@ AI_MODEL_OPTIONS = [
 def startup():
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     with SessionLocal() as db:
         seed_initial_template(db)
         seed_admin_user(db)
         sync_template_categories(db)
+
+
+def ensure_schema():
+    inspector = inspect(engine)
+    template_columns = {column["name"] for column in inspector.get_columns("templates")}
+    if "ai_evaluation_locked" not in template_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE templates ADD COLUMN ai_evaluation_locked BOOLEAN NOT NULL DEFAULT TRUE"))
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
@@ -372,7 +382,7 @@ def list_templates(_: User = Depends(get_current_user), db: Session = Depends(ge
 
 @app.post("/templates", response_model=TemplateOut)
 def create_template(payload: TemplateCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    template = Template(name=payload.name, description=payload.description)
+    template = Template(name=payload.name, description=payload.description, ai_evaluation_locked=payload.ai_evaluation_locked)
     db.add(template)
     db.flush()
     categories, criteria = normalized_template_parts(payload)
@@ -389,6 +399,7 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
     template = get_template_or_404(db, template_id)
     template.name = payload.name
     template.description = payload.description
+    template.ai_evaluation_locked = payload.ai_evaluation_locked
     template.categories.clear()
     template.criteria.clear()
     db.flush()
@@ -509,11 +520,14 @@ def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(get
 @app.post("/candidates/{candidate_id}/scores", response_model=list[ScoreOut])
 def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
+    template = get_template_or_404(db, candidate.template_id)
     valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
     for item in payload:
         criterion = db.query(Criterion).filter(Criterion.id == item.criterion_id).first()
         if not criterion or criterion.template_id != candidate.template_id:
             raise HTTPException(status_code=400, detail="Criterio inválido para este candidato.")
+        if template.ai_evaluation_locked and criterion.evaluation_mode == EvaluationMode.automatic:
+            continue
         file_ids = clean_file_ids(item.file_ids, valid_file_ids)
         source = "automatic" if criterion.evaluation_mode == EvaluationMode.automatic else "manual"
         upsert_score(db, candidate_id, item.criterion_id, item.score, source, item.rationale, file_ids)
