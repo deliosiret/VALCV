@@ -77,6 +77,10 @@ function percentStatus(total: number) {
   return { ok: false, text: `Excede ${toPercentInput(percent / 100)}%`, className: "bg-[#fee2e2] text-[#9a3412]" };
 }
 
+function ignoreNumberWheel(event: React.WheelEvent<HTMLInputElement>) {
+  event.currentTarget.blur();
+}
+
 type Mode = "manual" | "automatic";
 
 type Criterion = {
@@ -1099,6 +1103,7 @@ function App() {
                             max="100"
                             placeholder="Peso"
                             value={toPercentInput(category.weight)}
+                            onWheel={ignoreNumberWheel}
                             onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
                           />
                           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
@@ -1134,6 +1139,7 @@ function App() {
                                   max="100"
                                   placeholder="Peso"
                                   value={toPercentInput(criterion.within_category_weight)}
+                                  onWheel={ignoreNumberWheel}
                                   onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
                                 />
                                 <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
