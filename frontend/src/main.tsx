@@ -5,6 +5,7 @@ import {
   Bot,
   Copy,
   FilePenLine,
+  FileText,
   FileUp,
   Gauge,
   LogOut,
@@ -289,6 +290,11 @@ function toggleFileReference(currentIds: number[], fileId: number) {
   return currentIds.includes(fileId)
     ? currentIds.filter((currentId) => currentId !== fileId)
     : [...currentIds, fileId];
+}
+
+function candidateFileUrl(candidateId: number, fileId: number) {
+  const token = localStorage.getItem("valcv_token") ?? "";
+  return `${API_URL}/candidates/${candidateId}/files/${fileId}/view?token=${encodeURIComponent(token)}`;
 }
 
 function App() {
@@ -1161,6 +1167,15 @@ function App() {
                   {selectedCandidate.files.map((file) => (
                     <span className="inline-flex items-center gap-1.5 rounded-md bg-[#eef6f5] px-2 py-1.5 text-xs text-[#25464a]" key={file.id}>
                       <span className="max-w-56 truncate">{file.original_name}</span>
+                      <a
+                        className="grid size-5 place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
+                        href={candidateFileUrl(selectedCandidate.id, file.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Abrir documento"
+                      >
+                        <FileText size={14} />
+                      </a>
                       <button
                         className="grid size-5 cursor-pointer place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
                         type="button"

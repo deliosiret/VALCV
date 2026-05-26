@@ -4,8 +4,9 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, selectinload
 
@@ -74,14 +75,17 @@ def verify_password(password: str, password_hash: str) -> bool:
     return secrets.compare_digest(hash_password(password, salt), f"pbkdf2_sha256${salt}${digest}")
 
 
-def get_current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Inicia sesión para continuar.")
-    token = authorization.removeprefix("Bearer ").strip()
+def authenticate_token(db: Session, token: str) -> User:
     session = db.query(AuthSession).options(selectinload(AuthSession.user)).filter(AuthSession.token == token).first()
     if not session or not session.user.is_active:
         raise HTTPException(status_code=401, detail="Sesión inválida o vencida.")
     return session.user
+
+
+def get_current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Inicia sesión para continuar.")
+    return authenticate_token(db, authorization.removeprefix("Bearer ").strip())
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
@@ -515,6 +519,21 @@ def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(get
     db.delete(candidate_file)
     db.commit()
     return get_candidate_or_404(db, candidate_id)
+
+
+@app.get("/candidates/{candidate_id}/files/{file_id}/view")
+def view_candidate_file(candidate_id: int, file_id: int, token: str = Query(...), db: Session = Depends(get_db)):
+    authenticate_token(db, token)
+    candidate_file = get_candidate_file_or_404(db, candidate_id, file_id)
+    file_path = Path(settings.upload_dir) / candidate_file.stored_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return FileResponse(
+        file_path,
+        media_type=candidate_file.mime_type,
+        filename=candidate_file.original_name,
+        content_disposition_type="inline",
+    )
 
 
 @app.post("/candidates/{candidate_id}/scores", response_model=list[ScoreOut])
