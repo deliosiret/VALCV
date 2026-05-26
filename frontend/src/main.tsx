@@ -65,6 +65,18 @@ function fromPercentInput(value: string) {
   return (Number(value) || 0) / 100;
 }
 
+function clampWeight(value: number, maxValue = 1) {
+  return Math.max(0, Math.min(Number(value) || 0, maxValue));
+}
+
+function percentStatus(total: number) {
+  const diff = 1 - total;
+  const percent = Math.abs(diff) * 100;
+  if (Math.abs(diff) < 0.0001) return { ok: true, text: "100% completo", className: "bg-[#e6f1ef] text-brand" };
+  if (diff > 0) return { ok: false, text: `Falta ${toPercentInput(diff)}%`, className: "bg-[#fff7ed] text-[#9a3412]" };
+  return { ok: false, text: `Excede ${toPercentInput(percent / 100)}%`, className: "bg-[#fee2e2] text-[#9a3412]" };
+}
+
 type Mode = "manual" | "automatic";
 
 type Criterion = {
@@ -216,6 +228,38 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
       order_index: index,
     })),
   };
+}
+
+function normalizeWeightsEvenly(draft: TemplateDraft): TemplateDraft {
+  const categories = draft.categories.map((category) => ({
+    ...category,
+    weight: draft.categories.length ? 1 / draft.categories.length : 0,
+  }));
+  const criteriaByCategory = new Map<string, number>();
+  draft.criteria.forEach((criterion) => {
+    criteriaByCategory.set(criterion.category, (criteriaByCategory.get(criterion.category) ?? 0) + 1);
+  });
+  const criteria = draft.criteria.map((criterion) => {
+    const siblingCount = criteriaByCategory.get(criterion.category) ?? 0;
+    return {
+      ...criterion,
+      within_category_weight: siblingCount ? 1 / siblingCount : 0,
+    };
+  });
+  return { ...draft, categories, criteria };
+}
+
+function templateWeightIssues(draft: TemplateDraft) {
+  const issues: string[] = [];
+  const categoryTotal = draft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0);
+  if (draft.categories.length && !percentStatus(categoryTotal).ok) issues.push("las categorías no suman 100%");
+  draft.categories.forEach((category) => {
+    const childCriteria = draft.criteria.filter((criterion) => criterion.category === category.name);
+    if (!childCriteria.length) return;
+    const childTotal = childCriteria.reduce((total, criterion) => total + (Number(criterion.within_category_weight) || 0), 0);
+    if (!percentStatus(childTotal).ok) issues.push(`los criterios de "${category.name || "Sin nombre"}" no suman 100%`);
+  });
+  return issues;
 }
 
 function StarRating({ value, onChange, disabled = false }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
@@ -652,6 +696,44 @@ function App() {
     });
   }
 
+  function updateTemplateCategoryWeight(index: number, rawPercent: string) {
+    setTemplateDraft((current) => {
+      const requested = fromPercentInput(rawPercent);
+      const otherTotal = current.categories.reduce((total, category, categoryIndex) =>
+        categoryIndex === index ? total : total + (Number(category.weight) || 0), 0
+      );
+      const maxWeight = Math.max(0, 1 - otherTotal);
+      return {
+        ...current,
+        categories: current.categories.map((category, categoryIndex) =>
+          categoryIndex === index ? { ...category, weight: clampWeight(requested, maxWeight) } : category
+        ),
+      };
+    });
+  }
+
+  function updateTemplateCriterionWeight(index: number, rawPercent: string) {
+    setTemplateDraft((current) => {
+      const criterion = current.criteria[index];
+      const requested = fromPercentInput(rawPercent);
+      const otherTotal = current.criteria.reduce((total, row, rowIndex) =>
+        rowIndex === index || row.category !== criterion?.category ? total : total + (Number(row.within_category_weight) || 0), 0
+      );
+      const maxWeight = Math.max(0, 1 - otherTotal);
+      return {
+        ...current,
+        criteria: current.criteria.map((row, rowIndex) =>
+          rowIndex === index ? { ...row, within_category_weight: clampWeight(requested, maxWeight) } : row
+        ),
+      };
+    });
+  }
+
+  function distributeTemplateWeights() {
+    setTemplateDraft((current) => normalizeWeightsEvenly(current));
+    setNotice("Pesos distribuidos automáticamente.");
+  }
+
   function addTemplateCategory() {
     setTemplateDraft((current) => ({
       ...current,
@@ -691,17 +773,35 @@ function App() {
 
   async function saveTemplate(event: React.FormEvent) {
     event.preventDefault();
-    const categoryWeights = new Map(templateDraft.categories.map((category) => [category.name.trim(), Number(category.weight) || 0]));
+    let draftToSave = templateDraft;
+    let weightIssues = templateWeightIssues(draftToSave);
+    if (weightIssues.length) {
+      const shouldNormalize = window.confirm(
+        `Los pesos todavía no están completos: ${weightIssues.join(", ")}. ¿Quieres distribuirlos equitativamente y guardar como borrador?`
+      );
+      if (!shouldNormalize) {
+        setNotice("Ajusta los pesos hasta que cada grupo sume 100%.");
+        return;
+      }
+      draftToSave = normalizeWeightsEvenly(draftToSave);
+      setTemplateDraft(draftToSave);
+      weightIssues = templateWeightIssues(draftToSave);
+    }
+    if (weightIssues.length) {
+      setNotice("No se pudo completar automáticamente: revisa categorías y criterios.");
+      return;
+    }
+    const categoryWeights = new Map(draftToSave.categories.map((category) => [category.name.trim(), Number(category.weight) || 0]));
     const payload = {
-      name: templateDraft.name.trim(),
-      description: templateDraft.description.trim(),
-      ai_evaluation_locked: templateDraft.ai_evaluation_locked,
-      categories: templateDraft.categories.map((category, index) => ({
+      name: draftToSave.name.trim(),
+      description: draftToSave.description.trim(),
+      ai_evaluation_locked: draftToSave.ai_evaluation_locked,
+      categories: draftToSave.categories.map((category, index) => ({
         name: category.name.trim(),
         weight: Number(category.weight) || 0,
         order_index: index,
       })),
-      criteria: templateDraft.criteria.map((criterion, index) => ({
+      criteria: draftToSave.criteria.map((criterion, index) => ({
         code: criterion.code.trim(),
         category: criterion.category.trim(),
         aspect: criterion.aspect.trim(),
@@ -720,13 +820,13 @@ function App() {
     }
     setBusy(true);
     try {
-      const saved = await api<Template>(templateDraft.id ? `/templates/${templateDraft.id}` : "/templates", {
-        method: templateDraft.id ? "PUT" : "POST",
+      const saved = await api<Template>(draftToSave.id ? `/templates/${draftToSave.id}` : "/templates", {
+        method: draftToSave.id ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
       setTemplateEditorOpen(false);
       setSelectedTemplateId(saved.id);
-      setNotice(templateDraft.id ? "Plantilla actualizada" : "Plantilla creada");
+      setNotice(draftToSave.id ? "Plantilla actualizada" : "Plantilla creada");
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo guardar la plantilla");
@@ -956,16 +1056,32 @@ function App() {
               </label>
 
               <section className="grid gap-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-ink">Categorías y criterios</h3>
-                  <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={addTemplateCategory}>
-                    <Plus size={18} /> Categoría
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">Categorías y criterios</h3>
+                    <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${percentStatus(templateDraft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0)).className}`}>
+                      Categorías: {percentStatus(templateDraft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0)).text}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={distributeTemplateWeights}>
+                      Repartir pesos
+                    </button>
+                    <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={addTemplateCategory}>
+                      <Plus size={18} /> Categoría
+                    </button>
+                  </div>
                 </div>
                 {templateDraft.categories.map((category, categoryIndex) => {
                   const childCriteria = templateDraft.criteria
                     .map((criterion, criterionIndex) => ({ criterion, criterionIndex }))
                     .filter((row) => row.criterion.category === category.name);
+                  const childTotal = childCriteria.reduce((total, row) => total + (Number(row.criterion.within_category_weight) || 0), 0);
+                  const childStatus = childCriteria.length ? percentStatus(childTotal) : null;
+                  const categoryOtherTotal = templateDraft.categories.reduce((total, row, index) =>
+                    index === categoryIndex ? total : total + (Number(row.weight) || 0), 0
+                  );
+                  const categoryAvailable = Math.max(0, 1 - categoryOtherTotal - (Number(category.weight) || 0));
                   return (
                     <div className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={`${category.id ?? "cat"}-${categoryIndex}`}>
                       <div className="grid gap-2 border-b border-[#cfe0df] bg-[#e6f1ef] p-3 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
@@ -983,9 +1099,10 @@ function App() {
                             max="100"
                             placeholder="Peso"
                             value={toPercentInput(category.weight)}
-                            onChange={(event) => updateTemplateCategory(categoryIndex, { weight: fromPercentInput(event.target.value) })}
+                            onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
                           />
                           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Libre {toPercentInput(categoryAvailable)}%</small>
                         </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
                           <Plus size={18} /> Criterio
@@ -996,6 +1113,14 @@ function App() {
                       </div>
 
                       <div className="grid gap-2 bg-[#fbfdfc] p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-[#486366]">Criterios de esta categoría</span>
+                          {childStatus ? (
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${childStatus.className}`}>
+                              {childStatus.text}
+                            </span>
+                          ) : null}
+                        </div>
                         {childCriteria.length ? childCriteria.map(({ criterion, criterionIndex }) => (
                           <div className="rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
                             <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_64px_36px] md:items-center">
@@ -1009,9 +1134,14 @@ function App() {
                                   max="100"
                                   placeholder="Peso"
                                   value={toPercentInput(criterion.within_category_weight)}
-                                  onChange={(event) => updateTemplateCriterion(criterionIndex, { within_category_weight: fromPercentInput(event.target.value) })}
+                                  onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
                                 />
                                 <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                                <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
+                                  Libre {toPercentInput(Math.max(0, 1 - childCriteria.reduce((total, row) =>
+                                    row.criterionIndex === criterionIndex ? total : total + (Number(row.criterion.within_category_weight) || 0), 0
+                                  ) - (Number(criterion.within_category_weight) || 0)))}%
+                                </small>
                               </label>
                               <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(criterionIndex, { evaluation_mode })} />
                               <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(criterionIndex)} title="Eliminar criterio">
