@@ -51,6 +51,7 @@ const inputClass =
 const panelClass = "rounded-lg border border-line bg-surface p-4";
 const headingClass = "mb-3.5 flex items-center gap-2 text-base font-semibold tracking-normal text-ink";
 const mutedTextClass = "block text-xs leading-snug text-muted";
+const aiLockedTitle = "Este criterio fue evaluado por AI y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
 
 function candidateColor(index: number) {
   return COLORS[index % COLORS.length];
@@ -266,7 +267,7 @@ function templateWeightIssues(draft: TemplateDraft) {
   return issues;
 }
 
-function StarRating({ value, onChange, disabled = false }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
+function StarRating({ value, onChange, disabled = false, title }: { value: number; onChange: (value: number) => void; disabled?: boolean; title?: string }) {
   const boundedValue = Math.max(0, Math.min(5, Number(value) || 0));
 
   function selectStar(event: React.MouseEvent<HTMLButtonElement>, index: number) {
@@ -282,7 +283,7 @@ function StarRating({ value, onChange, disabled = false }: { value: number; onCh
   }
 
   return (
-    <div className="flex min-w-[178px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`}>
+    <div className="flex min-w-[178px] flex-nowrap items-center gap-1" aria-label={`Puntuación ${boundedValue} de 5`} title={title}>
       {Array.from({ length: 5 }, (_, index) => {
         const fillPercent = Math.max(0, Math.min(1, boundedValue - index)) * 100;
         return (
@@ -292,7 +293,7 @@ function StarRating({ value, onChange, disabled = false }: { value: number; onCh
             type="button"
             disabled={disabled}
             onClick={(event) => selectStar(event, index)}
-            title={`${index + 0.5} o ${index + 1} puntos`}
+            title={title ?? `${index + 0.5} o ${index + 1} puntos`}
           >
             <Star className="size-6" strokeWidth={1.8} />
             <span className="absolute inset-0 overflow-hidden text-[#db6400]" style={{ width: `${fillPercent}%` }} aria-hidden="true">
@@ -1296,8 +1297,8 @@ function App() {
                     <FileUp size={18} />
                     <input className="hidden" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />
                   </label>
-                  <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0} title="Evaluación automática">
-                    <Bot size={18} /> IA
+                  <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0} title="Evaluar criterios automáticos con IA">
+                    <Bot size={18} /> Evaluar con IA
                   </button>
                   <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy} title="Limpiar evaluación">
                     <RotateCcw size={18} /> Limpiar
@@ -1364,6 +1365,7 @@ function App() {
                                 <StarRating
                                   value={draftScores[criterion.id] ?? current?.score ?? 0}
                                   disabled={isAiLocked}
+                                  title={isAiLocked ? aiLockedTitle : undefined}
                                   onChange={(score) => {
                                     setDraftScores({ ...draftScores, [criterion.id]: score });
                                     markEvaluationDirty();
@@ -1373,6 +1375,7 @@ function App() {
                               <textarea
                                 className={`${inputClass} min-h-20 resize-y text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2] disabled:text-[#486366]`}
                                 disabled={isAiLocked}
+                                title={isAiLocked ? aiLockedTitle : undefined}
                                 placeholder={criterion.evaluation_mode === "manual" ? MANUAL_EVIDENCE_NOTE : criterion.notes || "Evidencia, justificación o comentario"}
                                 value={evidenceValue(criterion, current, draftRationales)}
                                 onChange={(event) => {
@@ -1392,7 +1395,7 @@ function App() {
                                       key={file.id}
                                       title={file.original_name}
                                     >
-                                      <label className={`inline-flex min-w-0 items-center gap-1.5 ${isAiLocked ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                                      <label className={`inline-flex min-w-0 items-center gap-1.5 ${isAiLocked ? "cursor-not-allowed" : "cursor-pointer"}`} title={isAiLocked ? aiLockedTitle : file.original_name}>
                                         <input
                                           className="size-3.5 accent-[#16697a]"
                                           type="checkbox"
