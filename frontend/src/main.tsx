@@ -1166,15 +1166,17 @@ function App() {
                 <div className="my-3 flex flex-wrap gap-2">
                   {selectedCandidate.files.map((file) => (
                     <span className="inline-flex items-center gap-1.5 rounded-md bg-[#eef6f5] px-2 py-1.5 text-xs text-[#25464a]" key={file.id}>
-                      <span className="max-w-56 truncate">{file.original_name}</span>
                       <a
-                        className="grid size-5 place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
+                        className="inline-flex min-w-0 items-center gap-1.5 rounded text-[#25464a] hover:text-brand"
                         href={candidateFileUrl(selectedCandidate.id, file.id)}
                         target="_blank"
                         rel="noreferrer"
                         title="Abrir documento"
                       >
-                        <FileText size={14} />
+                        <span className="max-w-56 truncate">{file.original_name}</span>
+                        <span className="grid size-5 shrink-0 place-items-center rounded bg-[#d9e8e6] hover:bg-[#c9ddda]">
+                          <FileText size={14} />
+                        </span>
                       </a>
                       <button
                         className="grid size-5 cursor-pointer place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
@@ -1237,8 +1239,8 @@ function App() {
                               {selectedCandidate.files.length ? (
                                 <div className="flex flex-wrap gap-1.5">
                                   {selectedCandidate.files.map((file) => (
-                                    <label
-                                      className={`inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${
+                                    <span
+                                      className={`inline-flex max-w-full items-center gap-1 rounded-md border py-1 pl-2 pr-1 text-xs ${
                                         referencedFileIds.includes(file.id)
                                           ? "border-brand bg-[#e6f1ef] text-brand"
                                           : "border-line bg-white text-[#486366]"
@@ -1246,21 +1248,32 @@ function App() {
                                       key={file.id}
                                       title={file.original_name}
                                     >
-                                      <input
-                                        className="size-3.5 accent-[#16697a]"
-                                        type="checkbox"
-                                        disabled={isAiLocked}
-                                        checked={referencedFileIds.includes(file.id)}
-                                        onChange={() => {
-                                          setDraftFileIds({
-                                            ...draftFileIds,
-                                            [criterion.id]: toggleFileReference(referencedFileIds, file.id),
-                                          });
-                                          markEvaluationDirty();
-                                        }}
-                                    />
-                                      <span className="max-w-44 truncate">{file.original_name}</span>
-                                    </label>
+                                      <label className={`inline-flex min-w-0 items-center gap-1.5 ${isAiLocked ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                                        <input
+                                          className="size-3.5 accent-[#16697a]"
+                                          type="checkbox"
+                                          disabled={isAiLocked}
+                                          checked={referencedFileIds.includes(file.id)}
+                                          onChange={() => {
+                                            setDraftFileIds({
+                                              ...draftFileIds,
+                                              [criterion.id]: toggleFileReference(referencedFileIds, file.id),
+                                            });
+                                            markEvaluationDirty();
+                                          }}
+                                      />
+                                        <span className="max-w-44 truncate">{file.original_name}</span>
+                                      </label>
+                                      <a
+                                        className="grid size-5 shrink-0 place-items-center rounded bg-[#eef6f5] text-[#25464a] hover:bg-[#d9e8e6] hover:text-brand"
+                                        href={candidateFileUrl(selectedCandidate.id, file.id)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title="Abrir documento"
+                                      >
+                                        <FileText size={13} />
+                                      </a>
+                                    </span>
                                   ))}
                                 </div>
                               ) : null}
