@@ -51,6 +51,19 @@ const panelClass = "rounded-lg border border-line bg-surface p-4";
 const headingClass = "mb-3.5 flex items-center gap-2 text-base font-semibold tracking-normal text-ink";
 const mutedTextClass = "block text-xs leading-snug text-muted";
 
+function candidateColor(index: number) {
+  return COLORS[index % COLORS.length];
+}
+
+function toPercentInput(value: number) {
+  const percent = (Number(value) || 0) * 100;
+  return Number.isInteger(percent) ? String(percent) : String(Number(percent.toFixed(4)));
+}
+
+function fromPercentInput(value: string) {
+  return (Number(value) || 0) / 100;
+}
+
 type Mode = "manual" | "automatic";
 
 type Criterion = {
@@ -713,10 +726,10 @@ function App() {
     ...(summary.reduce((acc, candidate) => ({ ...acc, [candidate.name]: Math.round((candidate.categories[category] ?? 0) * 100) }), {})),
   }));
 
-  const rankingData = summary.map((candidate) => ({
+  const rankingData = summary.map((candidate, index) => ({
     name: candidate.name,
     score: Math.round(candidate.global_score * 100),
-    fill: COLORS[candidate.id % COLORS.length],
+    fill: candidateColor(index),
   }));
 
   if (!token || !user) {
@@ -933,7 +946,19 @@ function App() {
                     <div className="rounded-lg border border-line bg-[#f8fbfa] p-3" key={`${category.id ?? "cat"}-${categoryIndex}`}>
                       <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
                         <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(categoryIndex, { name: event.target.value })} />
-                        <input className={inputClass} type="number" step="0.01" placeholder="Peso" value={category.weight} onChange={(event) => updateTemplateCategory(categoryIndex, { weight: Number(event.target.value) })} />
+                        <label className="relative">
+                          <input
+                            className={`${inputClass} pr-7`}
+                            type="number"
+                            step="1"
+                            min="0"
+                            max="100"
+                            placeholder="Peso"
+                            value={toPercentInput(category.weight)}
+                            onChange={(event) => updateTemplateCategory(categoryIndex, { weight: fromPercentInput(event.target.value) })}
+                          />
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                        </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
                           <Plus size={18} /> Criterio
                         </button>
@@ -947,7 +972,19 @@ function App() {
                           <div className="rounded-md border border-[#e5eeee] bg-white p-2.5" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
                             <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_130px_36px] md:items-center">
                               <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
-                              <input className={inputClass} type="number" step="0.01" placeholder="Peso interno" value={criterion.within_category_weight} onChange={(event) => updateTemplateCriterion(criterionIndex, { within_category_weight: Number(event.target.value) })} />
+                              <label className="relative">
+                                <input
+                                  className={`${inputClass} pr-7`}
+                                  type="number"
+                                  step="1"
+                                  min="0"
+                                  max="100"
+                                  placeholder="Peso"
+                                  value={toPercentInput(criterion.within_category_weight)}
+                                  onChange={(event) => updateTemplateCriterion(criterionIndex, { within_category_weight: fromPercentInput(event.target.value) })}
+                                />
+                                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                              </label>
                               <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(criterionIndex, { evaluation_mode })} />
                               <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(criterionIndex)} title="Eliminar criterio">
                                 <Trash2 size={16} />
@@ -1041,7 +1078,7 @@ function App() {
               <ResponsiveContainer width="100%" height={260}>
                 <RadialBarChart innerRadius="28%" outerRadius="95%" data={rankingData} startAngle={90} endAngle={-270}>
                   <RadialBar background dataKey="score">
-                    {rankingData.map((entry, index) => <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />)}
+                    {rankingData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
                   </RadialBar>
                   <Tooltip formatter={(value) => `${value}%`} />
                   <Legend iconSize={10} />
@@ -1056,13 +1093,28 @@ function App() {
                   <PolarAngleAxis dataKey="category" tick={{ fontSize: 11 }} />
                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
                   {summary.slice(0, 5).map((candidate, index) => (
-                    <Radar key={candidate.id} dataKey={candidate.name} stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.14} />
+                    <Radar key={candidate.id} dataKey={candidate.name} stroke={candidateColor(index)} fill={candidateColor(index)} fillOpacity={0.14} />
                   ))}
                   <Legend />
                   <Tooltip />
                 </RadarChart>
               </ResponsiveContainer>
             </div>
+          </div>
+
+          <div className={panelClass}>
+            <h2 className={headingClass}><BarChart3 size={18} /> Comparación compacta</h2>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={rankingData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis domain={[0, 100]} />
+                <Tooltip formatter={(value) => `${value}%`} />
+                <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+                  {rankingData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
 
           <div className={panelClass}>
@@ -1189,20 +1241,6 @@ function App() {
             )}
           </div>
 
-          <div className={panelClass}>
-            <h2 className={headingClass}><BarChart3 size={18} /> Comparación compacta</h2>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={rankingData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(value) => `${value}%`} />
-                <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {rankingData.map((entry, index) => <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </section>
       </div>
     </main>
