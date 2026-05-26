@@ -298,7 +298,7 @@ function App() {
     name: "",
     description: "",
     categories: [blankCategory()],
-    criteria: [blankCriterion()],
+    criteria: [],
   });
   const [notice, setNotice] = React.useState("Listo");
   const [busy, setBusy] = React.useState(false);
@@ -595,7 +595,7 @@ function App() {
 
   function openTemplateEditor(action: "new" | "edit" | "duplicate") {
     if (action === "new" || !selectedTemplate) {
-      setTemplateDraft({ name: "", description: "", categories: [blankCategory()], criteria: [blankCriterion()] });
+      setTemplateDraft({ name: "", description: "", categories: [blankCategory()], criteria: [] });
     } else {
       setTemplateDraft(toTemplateDraft(selectedTemplate, action === "duplicate"));
     }
@@ -637,21 +637,22 @@ function App() {
     setTemplateDraft((current) => {
       const removed = current.categories[index];
       const nextCategories = current.categories.filter((_, categoryIndex) => categoryIndex !== index);
-      const fallback = nextCategories[0]?.name ?? "";
       return {
         ...current,
         categories: nextCategories.length ? nextCategories : [blankCategory()],
-        criteria: current.criteria.map((criterion) =>
-          criterion.category === removed?.name ? { ...criterion, category: fallback } : criterion
-        ),
+        criteria: current.criteria.filter((criterion) => criterion.category !== removed?.name),
       };
     });
   }
 
-  function addTemplateCriterion() {
+  function addTemplateCriterion(categoryName: string) {
+    if (!categoryName.trim()) {
+      setNotice("Primero nombra la categoría.");
+      return;
+    }
     setTemplateDraft((current) => ({
       ...current,
-      criteria: [...current.criteria, blankCriterion(current.criteria.length)],
+      criteria: [...current.criteria, { ...blankCriterion(current.criteria.length), category: categoryName }],
     }));
   }
 
@@ -917,57 +918,57 @@ function App() {
                 </label>
               </div>
 
-              <section className="mb-4 grid gap-2">
+              <section className="grid gap-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-ink">Categorías</h3>
+                  <h3 className="text-sm font-semibold text-ink">Categorías y criterios</h3>
                   <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={addTemplateCategory}>
                     <Plus size={18} /> Categoría
                   </button>
                 </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {templateDraft.categories.map((category, index) => (
-                    <div className="grid gap-2 rounded-lg border border-line bg-[#f8fbfa] p-3 md:grid-cols-[minmax(0,1fr)_120px_36px]" key={`${category.id ?? "cat"}-${index}`}>
-                      <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(index, { name: event.target.value })} />
-                      <input className={inputClass} type="number" step="0.01" placeholder="Peso" value={category.weight} onChange={(event) => updateTemplateCategory(index, { weight: Number(event.target.value) })} />
-                      <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCategory(index)} title="Eliminar categoría">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
+                {templateDraft.categories.map((category, categoryIndex) => {
+                  const childCriteria = templateDraft.criteria
+                    .map((criterion, criterionIndex) => ({ criterion, criterionIndex }))
+                    .filter((row) => row.criterion.category === category.name);
+                  return (
+                    <div className="rounded-lg border border-line bg-[#f8fbfa] p-3" key={`${category.id ?? "cat"}-${categoryIndex}`}>
+                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
+                        <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(categoryIndex, { name: event.target.value })} />
+                        <input className={inputClass} type="number" step="0.01" placeholder="Peso" value={category.weight} onChange={(event) => updateTemplateCategory(categoryIndex, { weight: Number(event.target.value) })} />
+                        <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
+                          <Plus size={18} /> Criterio
+                        </button>
+                        <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCategory(categoryIndex)} title="Eliminar categoría">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
 
-              <section className="grid gap-2">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-ink">Criterios</h3>
-                  <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={addTemplateCriterion}>
-                    <Plus size={18} /> Criterio
-                  </button>
-                </div>
-                {templateDraft.criteria.map((criterion, index) => (
-                  <div className="rounded-lg border border-line bg-[#f8fbfa] p-3" key={`${criterion.id ?? "new"}-${index}`}>
-                    <div className="grid gap-2.5 md:grid-cols-[minmax(180px,0.8fr)_minmax(260px,1.4fr)_120px_130px_36px]">
-                      <select className={inputClass} value={criterion.category} onChange={(event) => updateTemplateCriterion(index, { category: event.target.value })} required>
-                        <option value="">Categoría</option>
-                        {templateDraft.categories.filter((category) => category.name.trim()).map((category) => (
-                          <option key={`${category.name}-${category.order_index}`} value={category.name}>{category.name}</option>
-                        ))}
-                      </select>
-                      <input className={inputClass} placeholder={`Criterio ${index + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(index, { aspect: event.target.value })} required />
-                      <input className={inputClass} type="number" step="0.01" placeholder="Peso interno" value={criterion.within_category_weight} onChange={(event) => updateTemplateCriterion(index, { within_category_weight: Number(event.target.value) })} />
-                      <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(index, { evaluation_mode })} />
-                      <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(index)} disabled={templateDraft.criteria.length === 1} title="Eliminar criterio">
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="mt-3 grid gap-2">
+                        {childCriteria.length ? childCriteria.map(({ criterion, criterionIndex }) => (
+                          <div className="rounded-md border border-[#e5eeee] bg-white p-2.5" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
+                            <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_130px_36px] md:items-center">
+                              <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
+                              <input className={inputClass} type="number" step="0.01" placeholder="Peso interno" value={criterion.within_category_weight} onChange={(event) => updateTemplateCriterion(criterionIndex, { within_category_weight: Number(event.target.value) })} />
+                              <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(criterionIndex, { evaluation_mode })} />
+                              <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(criterionIndex)} title="Eliminar criterio">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                            <textarea
+                              className={`${inputClass} mt-2 min-h-16 resize-y`}
+                              placeholder="Notas / evidencia esperada"
+                              value={criterion.notes}
+                              onChange={(event) => updateTemplateCriterion(criterionIndex, { notes: event.target.value })}
+                            />
+                          </div>
+                        )) : (
+                          <div className="rounded-md border border-dashed border-[#ccd8d9] bg-white px-3 py-4 text-sm text-muted">
+                            Agrega criterios dentro de esta categoría.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <textarea
-                      className={`${inputClass} mt-2 min-h-16 resize-y`}
-                      placeholder="Notas / evidencia esperada"
-                      value={criterion.notes}
-                      onChange={(event) => updateTemplateCriterion(index, { notes: event.target.value })}
-                    />
-                  </div>
-                ))}
+                  );
+                })}
               </section>
             </div>
 
