@@ -27,6 +27,8 @@ def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict
     total_global_weight = 0.0
 
     for criterion in criteria:
+        if criterion.is_critical:
+            continue
         score = score_by_criterion.get(criterion.id, 0.0)
         normalized = max(0.0, min(score, 5.0)) / 5.0
         global_score += normalized * criterion.global_weight

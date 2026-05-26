@@ -244,13 +244,14 @@ function normalizeWeightsEvenly(draft: TemplateDraft): TemplateDraft {
   }));
   const criteriaByCategory = new Map<string, number>();
   draft.criteria.forEach((criterion) => {
+    if (criterion.is_critical) return;
     criteriaByCategory.set(criterion.category, (criteriaByCategory.get(criterion.category) ?? 0) + 1);
   });
   const criteria = draft.criteria.map((criterion) => {
     const siblingCount = criteriaByCategory.get(criterion.category) ?? 0;
     return {
       ...criterion,
-      within_category_weight: siblingCount ? 1 / siblingCount : 0,
+      within_category_weight: criterion.is_critical ? 0 : siblingCount ? 1 / siblingCount : 0,
     };
   });
   return { ...draft, categories, criteria };
@@ -261,7 +262,7 @@ function templateWeightIssues(draft: TemplateDraft) {
   const categoryTotal = draft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0);
   if (draft.categories.length && !percentStatus(categoryTotal).ok) issues.push("las categorías no suman 100%");
   draft.categories.forEach((category) => {
-    const childCriteria = draft.criteria.filter((criterion) => criterion.category === category.name);
+    const childCriteria = draft.criteria.filter((criterion) => criterion.category === category.name && !criterion.is_critical);
     if (!childCriteria.length) return;
     const childTotal = childCriteria.reduce((total, criterion) => total + (Number(criterion.within_category_weight) || 0), 0);
     if (!percentStatus(childTotal).ok) issues.push(`los criterios de "${category.name || "Sin nombre"}" no suman 100%`);
@@ -775,9 +776,10 @@ function App() {
   function updateTemplateCriterionWeight(index: number, rawPercent: string) {
     setTemplateDraft((current) => {
       const criterion = current.criteria[index];
+      if (criterion?.is_critical) return current;
       const requested = fromPercentInput(rawPercent);
       const otherTotal = current.criteria.reduce((total, row, rowIndex) =>
-        rowIndex === index || row.category !== criterion?.category ? total : total + (Number(row.within_category_weight) || 0), 0
+        rowIndex === index || row.category !== criterion?.category || row.is_critical ? total : total + (Number(row.within_category_weight) || 0), 0
       );
       const maxWeight = Math.max(0, 1 - otherTotal);
       return {
@@ -792,6 +794,10 @@ function App() {
   function distributeTemplateWeights() {
     setTemplateDraft((current) => normalizeWeightsEvenly(current));
     setNotice("Pesos distribuidos automáticamente.");
+  }
+
+  function updateTemplateCritical(index: number, is_critical: boolean) {
+    updateTemplateCriterion(index, { is_critical, within_category_weight: is_critical ? 0 : templateDraft.criteria[index]?.within_category_weight ?? 0 });
   }
 
   function addTemplateCategory() {
@@ -866,8 +872,8 @@ function App() {
         category: criterion.category.trim(),
         aspect: criterion.aspect.trim(),
         category_weight: categoryWeights.get(criterion.category.trim()) ?? 0,
-        within_category_weight: Number(criterion.within_category_weight) || 0,
-        global_weight: (categoryWeights.get(criterion.category.trim()) ?? 0) * (Number(criterion.within_category_weight) || 0),
+        within_category_weight: criterion.is_critical ? 0 : Number(criterion.within_category_weight) || 0,
+        global_weight: criterion.is_critical ? 0 : (categoryWeights.get(criterion.category.trim()) ?? 0) * (Number(criterion.within_category_weight) || 0),
         scale: criterion.scale.trim() || "0 a 5",
         notes: criterion.notes.trim(),
         is_critical: criterion.is_critical,
@@ -1137,8 +1143,9 @@ function App() {
                   const childCriteria = templateDraft.criteria
                     .map((criterion, criterionIndex) => ({ criterion, criterionIndex }))
                     .filter((row) => row.criterion.category === category.name);
-                  const childTotal = childCriteria.reduce((total, row) => total + (Number(row.criterion.within_category_weight) || 0), 0);
-                  const childStatus = childCriteria.length ? percentStatus(childTotal) : null;
+                  const weightedChildCriteria = childCriteria.filter((row) => !row.criterion.is_critical);
+                  const childTotal = weightedChildCriteria.reduce((total, row) => total + (Number(row.criterion.within_category_weight) || 0), 0);
+                  const childStatus = weightedChildCriteria.length ? percentStatus(childTotal) : null;
                   const categoryOtherTotal = templateDraft.categories.reduce((total, row, index) =>
                     index === categoryIndex ? total : total + (Number(row.weight) || 0), 0
                   );
@@ -1176,7 +1183,7 @@ function App() {
 
                       <div className="grid gap-2 bg-[#fbfdfc] p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#486366]">Criterios de esta categoría</span>
+                          <span className="text-xs font-bold text-[#486366]">Criterios ponderados de esta categoría</span>
                           {childStatus ? (
                             <span className={`rounded-full px-2 py-1 text-xs font-semibold ${childStatus.className}`}>
                               {childStatus.text}
@@ -1187,26 +1194,32 @@ function App() {
                           <div className="rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={`${criterion.id ?? "new"}-${criterionIndex}`}>
                             <div className="grid gap-2 md:grid-cols-[minmax(260px,1fr)_120px_72px_64px_36px] md:items-center">
                               <input className={inputClass} placeholder={`Criterio ${criterionIndex + 1}`} value={criterion.aspect} onChange={(event) => updateTemplateCriterion(criterionIndex, { aspect: event.target.value })} required />
-                              <label className="relative">
-                                <input
-                                  className={`${inputClass} pr-7`}
-                                  type="number"
-                                  step="1"
-                                  min="0"
-                                  max="100"
-                                  placeholder="Peso"
-                                  value={toPercentInput(criterion.within_category_weight)}
-                                  onWheel={ignoreNumberWheel}
-                                  onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
-                                />
-                                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
-                                <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
-                                  Libre {toPercentInput(Math.max(0, 1 - childCriteria.reduce((total, row) =>
-                                    row.criterionIndex === criterionIndex ? total : total + (Number(row.criterion.within_category_weight) || 0), 0
-                                  ) - (Number(criterion.within_category_weight) || 0)))}%
-                                </small>
-                              </label>
-                              <CriticalToggle value={criterion.is_critical} onChange={(is_critical) => updateTemplateCriterion(criterionIndex, { is_critical })} />
+                              {criterion.is_critical ? (
+                                <div className="rounded-md border border-[#f0d7c5] bg-[#fff7ed] px-2.5 py-2 text-xs font-semibold text-[#9a3412]">
+                                  Sin peso
+                                </div>
+                              ) : (
+                                <label className="relative">
+                                  <input
+                                    className={`${inputClass} pr-7`}
+                                    type="number"
+                                    step="1"
+                                    min="0"
+                                    max="100"
+                                    placeholder="Peso"
+                                    value={toPercentInput(criterion.within_category_weight)}
+                                    onWheel={ignoreNumberWheel}
+                                    onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
+                                  />
+                                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                                  <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
+                                    Libre {toPercentInput(Math.max(0, 1 - childCriteria.reduce((total, row) =>
+                                      row.criterionIndex === criterionIndex || row.criterion.is_critical ? total : total + (Number(row.criterion.within_category_weight) || 0), 0
+                                    ) - (Number(criterion.within_category_weight) || 0)))}%
+                                  </small>
+                                </label>
+                              )}
+                              <CriticalToggle value={criterion.is_critical} onChange={(is_critical) => updateTemplateCritical(criterionIndex, is_critical)} />
                               <ModeToggle value={criterion.evaluation_mode} onChange={(evaluation_mode) => updateTemplateCriterion(criterionIndex, { evaluation_mode })} />
                               <button className={`${buttonClass} min-h-9 bg-[#9a3412] px-2`} type="button" onClick={() => removeTemplateCriterion(criterionIndex)} title="Eliminar criterio">
                                 <Trash2 size={16} />

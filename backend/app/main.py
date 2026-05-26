@@ -122,7 +122,7 @@ def normalized_criteria(criteria: list[CriterionIn]) -> list[dict]:
         row["category"] = category
         row["aspect"] = row["aspect"].strip()
         row["category_weight"] = max(0.0, float(row["category_weight"] or 0))
-        row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+        row["within_category_weight"] = 0.0 if row.get("is_critical") else max(0.0, float(row["within_category_weight"] or 0))
         row["global_weight"] = row["category_weight"] * row["within_category_weight"]
         row["order_index"] = idx
         rows.append(row)
@@ -163,7 +163,7 @@ def normalized_template_parts(payload: TemplateCreate) -> tuple[list[dict], list
         row["category"] = category
         row["aspect"] = row["aspect"].strip()
         row["category_weight"] = weights.get(category, max(0.0, float(row["category_weight"] or 0)))
-        row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+        row["within_category_weight"] = 0.0 if row.get("is_critical") else max(0.0, float(row["within_category_weight"] or 0))
         row["global_weight"] = row["category_weight"] * row["within_category_weight"]
         row["order_index"] = idx
         criteria.append(row)
@@ -430,7 +430,7 @@ def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(
     row["category"] = row["category"].strip()
     row["aspect"] = row["aspect"].strip()
     row["category_weight"] = max(0.0, float(row["category_weight"] or 0))
-    row["within_category_weight"] = max(0.0, float(row["within_category_weight"] or 0))
+    row["within_category_weight"] = 0.0 if row.get("is_critical") else max(0.0, float(row["within_category_weight"] or 0))
     row["global_weight"] = row["category_weight"] * row["within_category_weight"]
     for key, value in row.items():
         setattr(criterion, key, value)
