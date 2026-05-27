@@ -924,7 +924,6 @@ function App() {
         <form onSubmit={login} className="grid w-full max-w-sm gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
           <div className="grid gap-2">
             <img className="h-10 w-auto object-contain" src={logoSie} alt="SIE" />
-            <p className="text-xs font-extrabold uppercase text-accent">VALCV</p>
             <h1 className="text-2xl font-bold">Iniciar sesión</h1>
           </div>
           <input className={inputClass} placeholder="Usuario" value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} required />
@@ -942,7 +941,6 @@ function App() {
         <div className="flex min-w-0 items-center gap-3">
           <img className="h-10 w-auto shrink-0 object-contain md:h-12" src={logoSie} alt="SIE" />
           <div className="min-w-0">
-            <p className="mb-1 text-xs font-extrabold uppercase text-accent">VALCV</p>
             <h1 className="text-2xl font-bold leading-tight tracking-normal md:text-4xl">Evaluación de curriculum vitae</h1>
           </div>
         </div>
