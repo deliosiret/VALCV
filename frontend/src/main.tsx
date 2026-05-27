@@ -944,27 +944,27 @@ function App() {
             <h1 className="text-2xl font-bold leading-tight tracking-normal md:text-4xl">Evaluación de curriculum vitae</h1>
           </div>
         </div>
-        <div className="grid min-w-0 items-center gap-2.5 md:flex md:min-w-[420px]">
-          <select className={`${inputClass} md:min-w-60`} value={selectedTemplate?.id ?? ""} onChange={(event) => setSelectedTemplateId(Number(event.target.value))}>
+        <div className="grid min-w-0 grid-cols-5 items-center gap-2.5 md:flex md:min-w-[420px]">
+          <select className={`${inputClass} col-span-5 md:min-w-60`} value={selectedTemplate?.id ?? ""} onChange={(event) => setSelectedTemplateId(Number(event.target.value))}>
             {templates.map((template) => (
               <option key={template.id} value={template.id}>
                 {template.name}
               </option>
             ))}
           </select>
-          <button className={buttonClass} onClick={() => openTemplateEditor("edit")} disabled={busy || !selectedTemplate} title="Editar plantilla">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("edit")} disabled={busy || !selectedTemplate} title="Editar plantilla">
             <FilePenLine size={18} />
           </button>
-          <button className={buttonClass} onClick={() => openTemplateEditor("new")} disabled={busy} title="Nueva plantilla">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("new")} disabled={busy} title="Nueva plantilla">
             <Plus size={18} />
           </button>
-          <button className={buttonClass} onClick={() => load()} disabled={busy} title="Actualizar">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => load()} disabled={busy} title="Actualizar">
             <RefreshCw size={18} />
           </button>
-          <button className={buttonClass} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy} title="Configuración">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy} title="Configuración">
             <Settings size={18} />
           </button>
-          <button className={`${buttonClass} bg-[#486366]`} onClick={logout} disabled={busy} title="Cerrar sesión">
+          <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={logout} disabled={busy} title="Cerrar sesión">
             <LogOut size={18} />
           </button>
         </div>
