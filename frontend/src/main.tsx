@@ -422,6 +422,7 @@ function App() {
   const [aiSettings, setAiSettings] = React.useState<AISettings | null>(null);
   const [aiModels, setAiModels] = React.useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [editingApiKey, setEditingApiKey] = React.useState(false);
   const [settingsForm, setSettingsForm] = React.useState({ gemini_api_key: "", gemini_model: "gemini-3.1-flash-lite" });
   const [templateEditorOpen, setTemplateEditorOpen] = React.useState(false);
   const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>({
@@ -708,13 +709,15 @@ function App() {
     event.preventDefault();
     setBusy(true);
     try {
+      const shouldSaveApiKey = editingApiKey || !aiSettings?.gemini_api_key_configured;
       const payload = {
         gemini_model: settingsForm.gemini_model,
-        gemini_api_key: settingsForm.gemini_api_key.trim() || null,
+        gemini_api_key: shouldSaveApiKey ? settingsForm.gemini_api_key.trim() || null : null,
       };
       const saved = await api<AISettings>("/settings/ai", { method: "PUT", body: JSON.stringify(payload) });
       setAiSettings(saved);
       setSettingsForm({ gemini_api_key: "", gemini_model: saved.gemini_model });
+      setEditingApiKey(false);
       setSettingsOpen(false);
       setNotice("Configuración de IA guardada");
     } catch (error) {
@@ -954,7 +957,7 @@ function App() {
           <button className={buttonClass} onClick={() => load()} disabled={busy} title="Actualizar">
             <RefreshCw size={18} />
           </button>
-          <button className={buttonClass} onClick={() => setSettingsOpen(true)} disabled={busy} title="Configuración">
+          <button className={buttonClass} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy} title="Configuración">
             <Settings size={18} />
           </button>
           <button className={`${buttonClass} bg-[#486366]`} onClick={logout} disabled={busy} title="Cerrar sesión">
@@ -1010,16 +1013,42 @@ function App() {
                 </select>
               </label>
 
-              <label className="grid gap-1.5 text-sm font-semibold">
-                Gemini API key
-                <input
-                  className={inputClass}
-                  type="password"
-                  placeholder={aiSettings?.gemini_api_key_configured ? "Dejar vacío para conservar la actual" : "Pega tu API key"}
-                  value={settingsForm.gemini_api_key}
-                  onChange={(event) => setSettingsForm({ ...settingsForm, gemini_api_key: event.target.value })}
-                />
-              </label>
+              <div className="grid gap-1.5 text-sm font-semibold">
+                <span>Gemini API key</span>
+                {aiSettings?.gemini_api_key_configured && !editingApiKey ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-[#f8fbfa] px-3 py-2">
+                    <span className="text-sm text-muted">Se conservará la API key actual: {aiSettings.gemini_api_key_masked}</span>
+                    <button
+                      className={`${buttonClass} bg-[#486366]`}
+                      type="button"
+                      onClick={() => {
+                        setSettingsForm({ ...settingsForm, gemini_api_key: "" });
+                        setEditingApiKey(true);
+                      }}
+                    >
+                      Cambiar API key
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    className={inputClass}
+                    type="text"
+                    name="valcv-gemini-api-key"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    placeholder={aiSettings?.gemini_api_key_configured ? "Pega una nueva API key" : "Pega tu API key"}
+                    value={settingsForm.gemini_api_key}
+                    onChange={(event) => setSettingsForm({ ...settingsForm, gemini_api_key: event.target.value })}
+                  />
+                )}
+                <small className={mutedTextClass}>
+                  {editingApiKey || !aiSettings?.gemini_api_key_configured
+                    ? "Este campo no usa autocompletado del navegador."
+                    : "No se enviará ninguna API key nueva mientras no pulses Cambiar API key."}
+                </small>
+              </div>
 
               {user.is_admin ? (
                 <section className="mt-2 grid gap-3 border-t border-line pt-3">
@@ -1055,7 +1084,7 @@ function App() {
               ) : null}
 
               <div className="flex flex-wrap justify-end gap-2 pt-2">
-                <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setSettingsOpen(false)}>
+                <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => { setEditingApiKey(false); setSettingsOpen(false); }}>
                   Cancelar
                 </button>
                 <button className={buttonClass} type="submit" disabled={busy}>
