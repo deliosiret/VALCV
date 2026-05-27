@@ -912,11 +912,13 @@ function App() {
     ...(summary.reduce((acc, candidate) => ({ ...acc, [candidate.name]: Math.round((candidate.categories[category] ?? 0) * 100) }), {})),
   }));
 
-  const rankingData = summary.map((candidate, index) => ({
-    name: candidate.name,
-    score: Math.round(candidate.global_score * 100),
-    fill: candidateColor(index),
-  }));
+  const rankingData = summary
+    .map((candidate, index) => ({
+      name: candidate.name,
+      score: Math.round(candidate.global_score * 100),
+      fill: candidateColor(index),
+    }))
+    .sort((left, right) => right.score - left.score);
 
   if (!token || !user) {
     return (
