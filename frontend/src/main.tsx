@@ -442,6 +442,7 @@ function App() {
   const categories = Array.from(new Set(selectedTemplate?.criteria.map((criterion) => criterion.category) ?? []));
   const criteriaGroups = categories.map((category) => ({
     category,
+    weight: selectedTemplate?.categories.find((row) => row.name === category)?.weight ?? selectedTemplate?.criteria.find((criterion) => criterion.category === category)?.category_weight ?? 0,
     criteria: selectedTemplate?.criteria.filter((criterion) => criterion.category === category) ?? [],
   }));
 
@@ -1438,7 +1439,10 @@ function App() {
                           <span className="grid size-7 shrink-0 place-items-center rounded-md bg-brand text-xs font-extrabold text-white">{groupIndex + 1}</span>
                           <strong className="min-w-0 text-sm leading-tight text-[#25464a]">{group.category}</strong>
                         </div>
-                        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#486366]">{group.criteria.length} criterio(s)</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#486366]">Peso {toPercentInput(group.weight)}%</span>
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#486366]">{group.criteria.length} criterio(s)</span>
+                        </div>
                       </div>
                       <div className="grid gap-2.5 bg-[#fbfdfc] p-2.5 md:p-3">
                         {group.criteria.map((criterion, criterionIndex) => {
