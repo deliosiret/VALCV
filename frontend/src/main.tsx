@@ -39,6 +39,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import logoSie from "./assets/logo-sie.png";
 import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:18429";
@@ -921,8 +922,9 @@ function App() {
     return (
       <main className="grid min-h-screen place-items-center bg-app p-4 text-ink">
         <form onSubmit={login} className="grid w-full max-w-sm gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
-          <div>
-            <p className="mb-1 text-xs font-extrabold uppercase text-accent">VALCV</p>
+          <div className="grid gap-2">
+            <img className="h-10 w-auto object-contain" src={logoSie} alt="SIE" />
+            <p className="text-xs font-extrabold uppercase text-accent">VALCV</p>
             <h1 className="text-2xl font-bold">Iniciar sesión</h1>
           </div>
           <input className={inputClass} placeholder="Usuario" value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} required />
@@ -937,9 +939,12 @@ function App() {
   return (
     <main className="min-h-screen bg-app text-ink">
       <header className="grid items-stretch gap-4 border-b border-line bg-white px-4 py-5 md:flex md:items-center md:justify-between md:px-7">
-        <div>
-          <p className="mb-1 text-xs font-extrabold uppercase text-accent">VALCV</p>
-          <h1 className="text-2xl font-bold leading-tight tracking-normal md:text-4xl">Evaluación de curriculum vitae</h1>
+        <div className="flex min-w-0 items-center gap-3">
+          <img className="h-10 w-auto shrink-0 object-contain md:h-12" src={logoSie} alt="SIE" />
+          <div className="min-w-0">
+            <p className="mb-1 text-xs font-extrabold uppercase text-accent">VALCV</p>
+            <h1 className="text-2xl font-bold leading-tight tracking-normal md:text-4xl">Evaluación de curriculum vitae</h1>
+          </div>
         </div>
         <div className="grid min-w-0 items-center gap-2.5 md:flex md:min-w-[420px]">
           <select className={`${inputClass} md:min-w-60`} value={selectedTemplate?.id ?? ""} onChange={(event) => setSelectedTemplateId(Number(event.target.value))}>
