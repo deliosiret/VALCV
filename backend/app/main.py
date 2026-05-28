@@ -170,6 +170,23 @@ def normalized_template_parts(payload: TemplateCreate) -> tuple[list[dict], list
     return categories, criteria
 
 
+def criterion_requires_score_reset(criterion: Criterion, row: dict) -> bool:
+    comparable_fields = (
+        "category",
+        "aspect",
+        "scale",
+        "notes",
+        "is_critical",
+        "evaluation_mode",
+    )
+    return any(getattr(criterion, field) != row[field] for field in comparable_fields)
+
+
+def delete_scores_for_criterion(db: Session, criterion_id: int):
+    for score in db.query(Score).filter(Score.criterion_id == criterion_id).all():
+        db.delete(score)
+
+
 def sync_template_categories(db: Session):
     templates = db.query(Template).options(selectinload(Template.criteria), selectinload(Template.categories)).all()
     changed = False
@@ -397,6 +414,7 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_admin), d
     for category in categories:
         db.add(TemplateCategory(template_id=template.id, **category))
     for criterion in criteria:
+        criterion.pop("id", None)
         db.add(Criterion(template_id=template.id, **criterion))
     db.commit()
     return get_template_or_404(db, template.id)
@@ -409,13 +427,28 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
     template.description = payload.description
     template.ai_evaluation_locked = payload.ai_evaluation_locked
     template.categories.clear()
-    template.criteria.clear()
     db.flush()
     categories, criteria = normalized_template_parts(payload)
     for category in categories:
         template.categories.append(TemplateCategory(**category))
+    existing_criteria = {criterion.id: criterion for criterion in template.criteria}
+    kept_criterion_ids: set[int] = set()
     for criterion in criteria:
-        template.criteria.append(Criterion(**criterion))
+        criterion_id = criterion.pop("id", None)
+        if criterion_id and criterion_id in existing_criteria:
+            current = existing_criteria[criterion_id]
+            was_automatic = current.evaluation_mode == EvaluationMode.automatic
+            changed = criterion_requires_score_reset(current, criterion)
+            for key, value in criterion.items():
+                setattr(current, key, value)
+            kept_criterion_ids.add(current.id)
+            if changed and (was_automatic or current.evaluation_mode == EvaluationMode.automatic):
+                delete_scores_for_criterion(db, current.id)
+        else:
+            template.criteria.append(Criterion(**criterion))
+    for criterion in list(template.criteria):
+        if criterion.id and criterion.id not in kept_criterion_ids and criterion.id in existing_criteria:
+            db.delete(criterion)
     db.commit()
     return get_template_or_404(db, template_id)
 
@@ -425,15 +458,19 @@ def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
     if not criterion:
         raise HTTPException(status_code=404, detail="Criterio no encontrado")
-    row = payload.model_dump()
+    row = payload.model_dump(exclude={"id"})
     row["code"] = row["code"].strip() or criterion.code
     row["category"] = row["category"].strip()
     row["aspect"] = row["aspect"].strip()
     row["category_weight"] = max(0.0, float(row["category_weight"] or 0))
     row["within_category_weight"] = 0.0 if row.get("is_critical") else max(0.0, float(row["within_category_weight"] or 0))
     row["global_weight"] = row["category_weight"] * row["within_category_weight"]
+    was_automatic = criterion.evaluation_mode == EvaluationMode.automatic
+    changed = criterion_requires_score_reset(criterion, row)
     for key, value in row.items():
         setattr(criterion, key, value)
+    if changed and (was_automatic or criterion.evaluation_mode == EvaluationMode.automatic):
+        delete_scores_for_criterion(db, criterion.id)
     db.commit()
     return get_template_or_404(db, criterion.template_id)
 
@@ -581,6 +618,31 @@ def evaluate_ai(candidate_id: int, _: User = Depends(get_current_user), db: Sess
         score = max(0.0, min(score, 5.0))
         file_ids = clean_file_ids(item.get("file_ids", []), valid_file_ids)
         upsert_score(db, candidate.id, criterion_id, score, "automatic", str(item.get("rationale", "")), file_ids)
+    db.commit()
+    return get_candidate_or_404(db, candidate_id)
+
+
+@app.post("/candidates/{candidate_id}/criteria/{criterion_id}/evaluate-ai", response_model=CandidateOut)
+def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    candidate = get_candidate_or_404(db, candidate_id)
+    criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
+    if not criterion or criterion.template_id != candidate.template_id:
+        raise HTTPException(status_code=400, detail="Criterio inválido para este candidato.")
+    if criterion.evaluation_mode != EvaluationMode.automatic:
+        raise HTTPException(status_code=400, detail="Este criterio no está configurado para evaluación con IA.")
+    try:
+        api_key, model = get_ai_config(db)
+        results = evaluate_candidate_with_gemini(candidate, [criterion], settings.upload_dir, api_key, model)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
+    for item in results:
+        if int(item.get("criterion_id", 0)) != criterion.id:
+            continue
+        score = max(0.0, min(float(item.get("score", 0)), 5.0))
+        file_ids = clean_file_ids(item.get("file_ids", []), valid_file_ids)
+        upsert_score(db, candidate.id, criterion.id, score, "automatic", str(item.get("rationale", "")), file_ids)
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 

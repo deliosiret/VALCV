@@ -6,6 +6,7 @@ from app.models import EvaluationMode
 
 
 class CriterionIn(BaseModel):
+    id: int | None = None
     code: str = ""
     category: str
     aspect: str

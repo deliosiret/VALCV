@@ -707,6 +707,20 @@ function App() {
     }
   }
 
+  async function runCriterionAi(criterion: Criterion) {
+    if (!selectedCandidate) return;
+    setBusy(true);
+    try {
+      await api(`/candidates/${selectedCandidate.id}/criteria/${criterion.id}/evaluate-ai`, { method: "POST" });
+      setNotice(`Criterio reevaluado con IA: ${criterion.aspect}`);
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo reevaluar el criterio con IA");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAiSettings(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -873,6 +887,7 @@ function App() {
         order_index: index,
       })),
       criteria: draftToSave.criteria.map((criterion, index) => ({
+        id: criterion.id,
         code: criterion.code.trim(),
         category: criterion.category.trim(),
         aspect: criterion.aspect.trim(),
@@ -1467,6 +1482,17 @@ function App() {
                                       <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#e6f1ef] px-1.5 text-[10px] font-bold leading-none text-brand">
                                         AI
                                       </span>
+                                    ) : null}
+                                    {isAutomatic ? (
+                                      <button
+                                        className="inline-flex min-h-6 shrink-0 cursor-pointer items-center rounded-full border border-[#b9d0cf] bg-white px-2 text-[10px] font-bold leading-none text-brand hover:bg-[#e6f1ef] disabled:cursor-not-allowed disabled:opacity-50"
+                                        type="button"
+                                        onClick={() => runCriterionAi(criterion)}
+                                        disabled={busy || selectedCandidate.files.length === 0}
+                                        title="Reevaluar solo este criterio con IA"
+                                      >
+                                        Reevaluar
+                                      </button>
                                     ) : null}
                                     {criterion.is_critical ? (
                                       <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#fff7ed] px-1.5 text-[10px] font-bold leading-none text-[#9a3412]" title="Si este criterio no cumple, el score general queda en 0.">
