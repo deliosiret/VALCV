@@ -175,6 +175,19 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
     add_table(document, ["Categoría", "Peso definido", "Resultado del candidato"], rows)
 
 
+def candidate_documents_narrative(document: Document, candidate: Candidate) -> None:
+    if not candidate.files:
+        return
+    heading(document, "Documentación del expediente")
+    body(
+        document,
+        "Para la revisión del candidato se consideraron los documentos cargados en su expediente. Estos soportes forman "
+        "parte de la base documental utilizada para registrar los resultados y comentarios de evaluación.",
+    )
+    for file in candidate.files:
+        bullet(document, file.original_name)
+
+
 def weights_narrative(document: Document, template: Template, criteria: list[Criterion]) -> None:
     heading(document, "Estructura de evaluación")
     body(
@@ -202,11 +215,9 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
     heading(document, "Análisis por criterio")
     body(
         document,
-        "Esta sección resume las puntuaciones y comentarios registrados para cada criterio evaluado. Cuando existan "
-        "documentos vinculados, se listan como soporte documental al final del criterio correspondiente.",
+        "Esta sección resume las puntuaciones y comentarios registrados para cada criterio evaluado.",
     )
     score_by_criterion = {score.criterion_id: score for score in candidate.scores}
-    file_names = {file.id: file.original_name for file in candidate.files}
     grouped: dict[str, list[Criterion]] = defaultdict(list)
     for criterion in criteria:
         grouped[criterion.category].append(criterion)
@@ -220,9 +231,6 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
                 body(document, f"Comentario de evaluación: {score.rationale}")
             if score and score.evaluator_note:
                 body(document, f"Observación del evaluador: {score.evaluator_note}")
-            references = [file_names.get(file_id, str(file_id)) for file_id in (score.file_ids if score else [])]
-            if references:
-                bullet(document, ", ".join(references))
 
 
 def conclusion_text(summary: dict, template: Template) -> str:
@@ -254,6 +262,7 @@ def build_candidate_report(candidate: Candidate, template: Template, criteria: l
 
     add_cover(document, candidate, template, summary)
     category_narrative(document, template, summary)
+    candidate_documents_narrative(document, candidate)
     weights_narrative(document, template, criteria)
     document.add_section(WD_SECTION.NEW_PAGE)
     evaluation_narrative(document, candidate, criteria)
