@@ -86,6 +86,7 @@ def heading(document: Document, text: str, level: int = 1):
 
 def body(document: Document, text: str):
     paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     paragraph.paragraph_format.space_after = Pt(6)
     paragraph.paragraph_format.line_spacing = 1.08
     run = paragraph.add_run(text)
@@ -153,7 +154,7 @@ def add_cover(document: Document, candidate: Candidate, template: Template, summ
 
     body(
         document,
-        "Este documento resume la evaluación registrada en la plataforma VALCV. Su propósito es apoyar la revisión humana "
+        "Este documento resume la evaluación realizada al candidato. Su propósito es apoyar al equipo evaluador en la revisión "
         "del expediente curricular y facilitar una lectura ordenada de los criterios, evidencias y resultados obtenidos.",
     )
     document.add_page_break()
