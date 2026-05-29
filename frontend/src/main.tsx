@@ -657,6 +657,21 @@ function App() {
     }
   }
 
+  async function deleteUser(userId: number) {
+    const row = users.find((candidateUser) => candidateUser.id === userId);
+    if (!row || !window.confirm(`¿Eliminar el usuario ${userFullName(row)}?`)) return;
+    setBusy(true);
+    try {
+      await api<{ ok: boolean }>(`/users/${userId}`, { method: "DELETE" });
+      setUsers(await api<User[]>("/users"));
+      setNotice("Usuario eliminado");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo eliminar el usuario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateCriterion(criterion: Criterion, changes: Partial<Criterion>) {
     setBusy(true);
     try {
@@ -1189,17 +1204,49 @@ function App() {
                   </h3>
                   <div className="grid gap-2">
                     {users.map((row) => (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
-                        <strong>{userFullName(row)}</strong>
-                        <span className={mutedTextClass}>
-                          {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
-                        </span>
+                      <div className="grid grid-cols-[minmax(0,1fr)_28px] items-center gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
+                        <div className="min-w-0">
+                          <strong className="block truncate">{userFullName(row)}</strong>
+                          <span className={mutedTextClass}>
+                            {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
+                          </span>
+                        </div>
+                        <button
+                          className="grid size-7 cursor-pointer place-items-center rounded bg-[#eef6f5] text-[#9a3412] hover:bg-[#e3efed] disabled:cursor-not-allowed disabled:opacity-45"
+                          type="button"
+                          onClick={() => deleteUser(row.id)}
+                          disabled={busy || row.id === user.id}
+                          title={row.id === user.id ? "No puedes eliminar tu propio usuario activo" : "Eliminar usuario"}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     ))}
                   </div>
                   <div className="grid gap-2 md:grid-cols-2">
-                    <input className={inputClass} placeholder="Usuario" value={userForm.username} onChange={(event) => setUserForm({ ...userForm, username: event.target.value })} />
-                    <input className={inputClass} type="password" placeholder="Contraseña" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
+                    <input
+                      className={inputClass}
+                      name="valcv-new-user-login"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      placeholder="Usuario"
+                      value={userForm.username}
+                      onChange={(event) => setUserForm({ ...userForm, username: event.target.value })}
+                    />
+                    <input
+                      className={inputClass}
+                      type="password"
+                      name="valcv-new-user-secret"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      placeholder="Contraseña"
+                      value={userForm.password}
+                      onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+                    />
                     <input className={inputClass} placeholder="Nombre" value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} />
                     <input className={inputClass} placeholder="Apellido" value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} />
                     <input className={inputClass} placeholder="Cargo" value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} />

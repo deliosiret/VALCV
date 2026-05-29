@@ -529,6 +529,20 @@ def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Sessi
     return user
 
 
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propio usuario activo.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if user.is_admin and db.query(User).filter(User.is_admin == True, User.is_active == True, User.id != user_id).count() == 0:
+        raise HTTPException(status_code=400, detail="Debe quedar al menos un administrador activo.")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/settings/ai", response_model=AISettingsOut)
 def read_ai_settings(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     api_key, model = get_ai_config(db)
