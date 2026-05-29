@@ -30,6 +30,12 @@ def score_text(score: float | None) -> str:
     return "Sin evaluar" if score is None else f"{score:.1f}/5"
 
 
+def report_recommendation(value: str) -> str:
+    if value == "No califica por criterio crítico":
+        return "No califica para el perfil"
+    return value
+
+
 def set_cell_shading(cell, fill: str) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     shd = OxmlElement("w:shd")
@@ -132,12 +138,12 @@ def add_cover(document: Document, candidate: Candidate, template: Template, summ
     run.font.color.rgb = TEAL
 
     rows = [
-        ["Plantilla de evaluación", template.name],
+        ["Perfil evaluado", template.name],
         ["Cédula / ID", candidate.document_id or "No registrado"],
         ["Evaluador asignado", candidate.evaluator or "No registrado"],
         ["Fecha de generación", datetime.now().strftime("%d/%m/%Y %H:%M")],
         ["Resultado global", percent(summary["global_score"])],
-        ["Recomendación", summary["recommendation"]],
+        ["Recomendación", report_recommendation(summary["recommendation"])],
     ]
     add_table(document, ["Dato", "Detalle"], rows)
 
@@ -153,13 +159,13 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
     heading(document, "Resumen ejecutivo de resultados")
     body(
         document,
-        f"El candidato fue evaluado con la plantilla \"{template.name}\" y obtuvo un resultado global de "
+        f"El candidato fue evaluado para el perfil \"{template.name}\" y obtuvo un resultado global de "
         f"{percent(summary['global_score'])}. La recomendación calculada por la plataforma es: "
-        f"{summary['recommendation']}. Este resultado se deriva de los criterios ponderados definidos en la plantilla y "
+        f"{report_recommendation(summary['recommendation'])}. Este resultado se deriva de los criterios ponderados definidos para el perfil y "
         "de las puntuaciones registradas durante la revisión del expediente.",
     )
     if template.description:
-        body(document, f"Descripción de la plantilla: {template.description}")
+        body(document, f"Descripción del perfil: {template.description}")
 
     rows = [[category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))] for category in template.categories]
     add_table(document, ["Categoría", "Peso definido", "Resultado del candidato"], rows)
@@ -218,8 +224,8 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
 def conclusion_text(summary: dict, template: Template) -> str:
     if summary["recommendation"] == "No califica por criterio crítico":
         return (
-            "La evaluación registra al menos un criterio crítico no cumplido o no evidenciado. Conforme a la lógica "
-            "definida en la plantilla, esta condición impide que el candidato califique globalmente, aun cuando pueda "
+            "La evaluación registra al menos un requisito obligatorio no cumplido o no evidenciado para el perfil. "
+            "Esta condición impide que el candidato califique globalmente, aun cuando pueda "
             "presentar fortalezas parciales en otras categorías."
         )
     score = summary["global_score"]
@@ -230,10 +236,10 @@ def conclusion_text(summary: dict, template: Template) -> str:
     elif score >= 0.55:
         tone = "El perfil requiere revisión adicional para determinar si las brechas observadas pueden ser compensadas por entrevista, examen o validación técnica."
     else:
-        tone = "El perfil muestra una correspondencia limitada con los criterios definidos para la plantilla aplicada."
+        tone = "El perfil muestra una correspondencia limitada con los criterios definidos para la vacante evaluada."
     return (
         f"{tone} El resultado debe analizarse junto con las evidencias documentales, las observaciones del evaluador y "
-        f"los objetivos específicos de la vacante evaluada mediante la plantilla \"{template.name}\"."
+        f"los objetivos específicos del perfil \"{template.name}\"."
     )
 
 
