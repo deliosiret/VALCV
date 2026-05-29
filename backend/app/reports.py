@@ -3,13 +3,15 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Inches, Pt, RGBColor
 
 from app.models import Candidate, Criterion, Template
 from app.scoring import summarize_candidate
@@ -17,10 +19,16 @@ from app.scoring import summarize_candidate
 
 BLUE = RGBColor(37, 70, 74)
 TEAL = RGBColor(22, 105, 122)
+ORANGE = RGBColor(219, 100, 0)
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo-sie.png"
 
 
 def percent(value: float) -> str:
     return f"{round((value or 0) * 100, 2)}%"
+
+
+def score_text(score: float | None) -> str:
+    return "Sin evaluar" if score is None else f"{score:.1f}/5"
 
 
 def set_cell_shading(cell, fill: str) -> None:
@@ -30,14 +38,33 @@ def set_cell_shading(cell, fill: str) -> None:
     tc_pr.append(shd)
 
 
-def set_cell_text(cell, text: str, bold: bool = False) -> None:
+def set_cell_text(cell, text: str, bold: bool = False, size: float = 9.0) -> None:
     cell.text = ""
     paragraph = cell.paragraphs[0]
     run = paragraph.add_run(text)
     run.bold = bold
     run.font.name = "Aptos"
-    run.font.size = Pt(9)
+    run.font.size = Pt(size)
     paragraph.paragraph_format.space_after = Pt(0)
+
+
+def configure(document: Document) -> None:
+    section = document.sections[0]
+    section.top_margin = Cm(1.7)
+    section.bottom_margin = Cm(1.7)
+    section.left_margin = Cm(2.0)
+    section.right_margin = Cm(2.0)
+    styles = document.styles
+    styles["Normal"].font.name = "Aptos"
+    styles["Normal"].font.size = Pt(10.5)
+    for name in ("Title", "Heading 1", "Heading 2"):
+        styles[name].font.name = "Aptos Display"
+    footer = section.footer.paragraphs[0]
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = footer.add_run("Superintendencia de Electricidad - Reporte de evaluación curricular")
+    run.font.name = "Aptos"
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(100, 100, 100)
 
 
 def heading(document: Document, text: str, level: int = 1):
@@ -50,23 +77,21 @@ def heading(document: Document, text: str, level: int = 1):
 
 def body(document: Document, text: str):
     paragraph = document.add_paragraph()
-    paragraph.paragraph_format.space_after = Pt(5)
+    paragraph.paragraph_format.space_after = Pt(6)
+    paragraph.paragraph_format.line_spacing = 1.08
     run = paragraph.add_run(text)
     run.font.name = "Aptos"
     run.font.size = Pt(10.5)
     return paragraph
 
 
-def add_key_value_table(document: Document, rows: list[tuple[str, str]]) -> None:
-    table = document.add_table(rows=0, cols=2)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.style = "Table Grid"
-    for label, value in rows:
-        cells = table.add_row().cells
-        set_cell_text(cells[0], label, True)
-        set_cell_text(cells[1], value)
-        set_cell_shading(cells[0], "DCECEA")
-    document.add_paragraph()
+def bullet(document: Document, text: str):
+    paragraph = document.add_paragraph(style="List Bullet")
+    paragraph.paragraph_format.space_after = Pt(3)
+    run = paragraph.add_run(text)
+    run.font.name = "Aptos"
+    run.font.size = Pt(10.5)
+    return paragraph
 
 
 def add_table(document: Document, headers: list[str], rows: list[list[str]]) -> None:
@@ -83,32 +108,20 @@ def add_table(document: Document, headers: list[str], rows: list[list[str]]) -> 
     document.add_paragraph()
 
 
-def configure(document: Document) -> None:
-    styles = document.styles
-    styles["Normal"].font.name = "Aptos"
-    styles["Normal"].font.size = Pt(10.5)
-    section = document.sections[0]
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run("Reporte de evaluación curricular - VALCV")
-    run.font.name = "Aptos"
-    run.font.size = Pt(8)
-    run.font.color.rgb = RGBColor(100, 100, 100)
-
-
-def build_candidate_report(candidate: Candidate, template: Template, criteria: list[Criterion]) -> BytesIO:
-    document = Document()
-    configure(document)
-    summary = summarize_candidate(candidate, criteria)
-    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
-    file_names = {file.id: file.original_name for file in candidate.files}
+def add_cover(document: Document, candidate: Candidate, template: Template, summary: dict) -> None:
+    if LOGO_PATH.exists():
+        logo = document.add_paragraph()
+        logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        logo.add_run().add_picture(str(LOGO_PATH), width=Inches(2.4))
 
     title = document.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("Reporte de evaluación curricular")
+    title.paragraph_format.space_before = Pt(18)
+    title.paragraph_format.space_after = Pt(8)
+    run = title.add_run("Reporte individual de evaluación curricular")
     run.bold = True
     run.font.name = "Aptos Display"
-    run.font.size = Pt(20)
+    run.font.size = Pt(21)
     run.font.color.rgb = BLUE
 
     subtitle = document.add_paragraph()
@@ -117,74 +130,135 @@ def build_candidate_report(candidate: Candidate, template: Template, criteria: l
     run.bold = True
     run.font.name = "Aptos"
     run.font.size = Pt(14)
-    run.font.color.rgb = TEAL
+    run.font.color.rgb = ORANGE
 
-    heading(document, "Datos generales")
-    add_key_value_table(
+    rows = [
+        ["Plantilla de evaluación", template.name],
+        ["Cédula / ID", candidate.document_id or "No registrado"],
+        ["Evaluador asignado", candidate.evaluator or "No registrado"],
+        ["Fecha de generación", datetime.now().strftime("%d/%m/%Y %H:%M")],
+        ["Resultado global", percent(summary["global_score"])],
+        ["Recomendación", summary["recommendation"]],
+    ]
+    add_table(document, ["Dato", "Detalle"], rows)
+
+    body(
         document,
-        [
-            ("Candidato", candidate.name),
-            ("Cédula / ID", candidate.document_id or "No registrado"),
-            ("Plantilla utilizada", template.name),
-            ("Evaluador asignado", candidate.evaluator or "No registrado"),
-            ("Fecha de generación", datetime.now().strftime("%d/%m/%Y %H:%M")),
-            ("Resultado global", percent(summary["global_score"])),
-            ("Recomendación", summary["recommendation"]),
-        ],
+        "Este documento resume la evaluación registrada en la plataforma VALCV. Su propósito es apoyar la revisión humana "
+        "del expediente curricular y facilitar una lectura ordenada de los criterios, evidencias y resultados obtenidos.",
     )
+    document.add_page_break()
 
-    heading(document, "Resumen de resultados")
-    category_rows = []
-    for category in template.categories:
-        category_rows.append([category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))])
-    add_table(document, ["Categoría", "Peso en plantilla", "Resultado obtenido"], category_rows)
 
-    heading(document, "Ponderaciones y criterios utilizados")
+def category_narrative(document: Document, template: Template, summary: dict) -> None:
+    heading(document, "Resumen ejecutivo de resultados")
+    body(
+        document,
+        f"El candidato fue evaluado con la plantilla \"{template.name}\" y obtuvo un resultado global de "
+        f"{percent(summary['global_score'])}. La recomendación calculada por la plataforma es: "
+        f"{summary['recommendation']}. Este resultado se deriva de los criterios ponderados definidos en la plantilla y "
+        "de las puntuaciones registradas durante la revisión del expediente.",
+    )
+    if template.description:
+        body(document, f"Descripción de la plantilla: {template.description}")
+
+    rows = [[category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))] for category in template.categories]
+    add_table(document, ["Categoría", "Peso definido", "Resultado del candidato"], rows)
+
+
+def weights_narrative(document: Document, template: Template, criteria: list[Criterion]) -> None:
+    heading(document, "Criterios y ponderaciones utilizados")
+    body(
+        document,
+        "La evaluación se organizó por categorías. Cada categoría tiene un peso dentro del resultado general, y los "
+        "criterios no críticos distribuyen el peso interno de su categoría. Los criterios marcados como críticos no "
+        "aportan ponderación numérica; funcionan como requisitos de cumplimiento obligatorio.",
+    )
     grouped: dict[str, list[Criterion]] = defaultdict(list)
     for criterion in criteria:
         grouped[criterion.category].append(criterion)
-    rows = []
     for category in template.categories:
-        for criterion in grouped.get(category.name, []):
-            rows.append(
-                [
-                    category.name,
-                    percent(category.weight),
-                    criterion.aspect,
-                    "Crítico" if criterion.is_critical else percent(criterion.within_category_weight),
-                    "IA" if criterion.evaluation_mode == "automatic" else "Manual",
-                    criterion.notes or "",
-                ]
-            )
-    add_table(document, ["Categoría", "Peso categoría", "Criterio", "Peso criterio", "Modo", "Notas de evaluación"], rows)
+        heading(document, f"{category.name} ({percent(category.weight)})", 2)
+        children = grouped.get(category.name, [])
+        if not children:
+            body(document, "No se registraron criterios en esta categoría.")
+            continue
+        for criterion in children:
+            mode = "asistido por IA" if criterion.evaluation_mode == "automatic" else "manual"
+            weight = "criterio crítico, sin ponderación" if criterion.is_critical else f"peso interno {percent(criterion.within_category_weight)}"
+            body(document, f"{criterion.aspect}: {weight}; evaluación {mode}.")
+            if criterion.notes:
+                bullet(document, f"Orientación de evaluación: {criterion.notes}")
 
-    heading(document, "Detalle de evaluación")
-    detail_rows = []
+
+def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
+    heading(document, "Detalle narrativo de la evaluación")
+    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
+    file_names = {file.id: file.original_name for file in candidate.files}
+    grouped: dict[str, list[Criterion]] = defaultdict(list)
     for criterion in criteria:
-        score = score_by_criterion.get(criterion.id)
-        references = ", ".join(file_names.get(file_id, str(file_id)) for file_id in (score.file_ids if score else []))
-        detail_rows.append(
-            [
-                criterion.category,
-                criterion.aspect,
-                "Crítico" if criterion.is_critical else ("IA" if criterion.evaluation_mode == "automatic" else "Manual"),
-                f"{score.score:.1f}/5" if score else "Sin evaluar",
-                score.rationale if score else "",
-                score.evaluator_note if score else "",
-                references,
-            ]
+        grouped[criterion.category].append(criterion)
+
+    for category, children in grouped.items():
+        heading(document, category, 2)
+        for criterion in children:
+            score = score_by_criterion.get(criterion.id)
+            mode = "criterio crítico" if criterion.is_critical else ("evaluación asistida por IA" if criterion.evaluation_mode == "automatic" else "evaluación manual")
+            body(document, f"{criterion.aspect}. Tipo: {mode}. Puntuación registrada: {score_text(score.score if score else None)}.")
+            if score and score.rationale:
+                body(document, f"Evidencia o justificación registrada: {score.rationale}")
+            if score and score.evaluator_note:
+                body(document, f"Nota complementaria del evaluador: {score.evaluator_note}")
+            references = [file_names.get(file_id, str(file_id)) for file_id in (score.file_ids if score else [])]
+            if references:
+                bullet(document, f"Documentos referenciados: {', '.join(references)}")
+            elif score:
+                bullet(document, "No se asociaron documentos específicos a este criterio.")
+
+
+def conclusion_text(summary: dict, template: Template) -> str:
+    if summary["recommendation"] == "No califica por criterio crítico":
+        return (
+            "La evaluación registra al menos un criterio crítico no cumplido o no evidenciado. Conforme a la lógica "
+            "definida en la plantilla, esta condición impide que el candidato califique globalmente, aun cuando pueda "
+            "presentar fortalezas parciales en otras categorías."
         )
-    add_table(document, ["Categoría", "Criterio", "Tipo", "Puntuación", "Evidencia / justificación", "Nota del evaluador", "Documentos"], detail_rows)
+    score = summary["global_score"]
+    if score >= 0.85:
+        tone = "El perfil presenta una correspondencia alta con los criterios definidos."
+    elif score >= 0.7:
+        tone = "El perfil presenta una correspondencia favorable con los criterios definidos, con aspectos que pueden ser revisados en fases posteriores."
+    elif score >= 0.55:
+        tone = "El perfil requiere revisión adicional para determinar si las brechas observadas pueden ser compensadas por entrevista, examen o validación técnica."
+    else:
+        tone = "El perfil muestra una correspondencia limitada con los criterios definidos para la plantilla aplicada."
+    return (
+        f"{tone} El resultado debe analizarse junto con las evidencias documentales, las observaciones del evaluador y "
+        f"los objetivos específicos de la vacante evaluada mediante la plantilla \"{template.name}\"."
+    )
+
+
+def build_candidate_report(candidate: Candidate, template: Template, criteria: list[Criterion]) -> BytesIO:
+    document = Document()
+    configure(document)
+    summary = summarize_candidate(candidate, criteria)
+
+    add_cover(document, candidate, template, summary)
+    category_narrative(document, template, summary)
+    weights_narrative(document, template, criteria)
+    document.add_section(WD_SECTION.NEW_PAGE)
+    evaluation_narrative(document, candidate, criteria)
 
     heading(document, "Observaciones generales")
     body(document, candidate.comments or "No se registraron observaciones generales para este candidato.")
 
     heading(document, "Conclusión")
+    body(document, conclusion_text(summary, template))
     body(
         document,
-        f"Con base en la plantilla \"{template.name}\", el candidato obtiene un resultado global de {percent(summary['global_score'])}. "
-        f"La recomendación generada por el sistema es: {summary['recommendation']}. "
-        "Este reporte resume la evaluación registrada en la plataforma y debe interpretarse como soporte documental para la revisión humana y la decisión institucional correspondiente.",
+        "Este reporte tiene carácter de soporte documental. La decisión final sobre el proceso de selección corresponde "
+        "a las instancias humanas competentes, considerando el expediente completo, las entrevistas, validaciones y "
+        "demás elementos institucionales aplicables.",
     )
 
     buffer = BytesIO()
