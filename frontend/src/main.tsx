@@ -428,6 +428,9 @@ function App() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [editingApiKey, setEditingApiKey] = React.useState(false);
   const [settingsForm, setSettingsForm] = React.useState({ gemini_api_key: "", gemini_model: "gemini-3.1-flash-lite" });
+  const [templateStartOpen, setTemplateStartOpen] = React.useState(false);
+  const [templateAiText, setTemplateAiText] = React.useState("");
+  const [templateAiFile, setTemplateAiFile] = React.useState<File | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = React.useState(false);
   const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>({
     name: "",
@@ -760,6 +763,44 @@ function App() {
     setTemplateEditorOpen(true);
   }
 
+  function openNewTemplateFlow() {
+    setTemplateAiText("");
+    setTemplateAiFile(null);
+    setTemplateStartOpen(true);
+  }
+
+  function startBlankTemplate() {
+    setTemplateStartOpen(false);
+    openTemplateEditor("new");
+  }
+
+  async function generateTemplateDraftWithAi() {
+    if (!templateAiText.trim() && !templateAiFile) {
+      setNotice("Carga un PDF o escribe los requisitos.");
+      return;
+    }
+    const form = new FormData();
+    form.append("requirements_text", templateAiText);
+    if (templateAiFile) form.append("requirements_file", templateAiFile);
+    setBusy(true);
+    try {
+      const generated = await api<TemplateDraft>("/templates/generate-ai", { method: "POST", body: form });
+      setTemplateDraft({
+        ...generated,
+        id: undefined,
+        categories: generated.categories.map((category, index) => ({ ...category, id: undefined, order_index: index })),
+        criteria: generated.criteria.map((criterion, index) => ({ ...criterion, id: undefined, order_index: index })),
+      });
+      setTemplateStartOpen(false);
+      setTemplateEditorOpen(true);
+      setNotice("Borrador de plantilla generado con IA. Revísalo antes de guardar.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo generar la plantilla con IA");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function updateTemplateCriterion(index: number, changes: Partial<CriterionDraft>) {
     setTemplateDraft((current) => ({
       ...current,
@@ -980,7 +1021,7 @@ function App() {
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("edit")} disabled={busy || !selectedTemplate} title="Editar plantilla">
             <FilePenLine size={18} />
           </button>
-          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("new")} disabled={busy} title="Nueva plantilla">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={openNewTemplateFlow} disabled={busy} title="Nueva plantilla">
             <Plus size={18} />
           </button>
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => load()} disabled={busy} title="Actualizar">
@@ -1122,6 +1163,72 @@ function App() {
               </div>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {templateStartOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/35 p-3">
+          <div className="grid max-h-[92vh] w-full max-w-3xl gap-4 overflow-y-auto rounded-lg border border-line bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
+              <div>
+                <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+                  <Plus size={18} /> Nueva plantilla
+                </h2>
+                <p className="text-sm text-muted">Inicia desde cero o genera un borrador con IA a partir de requisitos.</p>
+              </div>
+              <button className={`${buttonClass} bg-[#486366] px-2`} type="button" onClick={() => setTemplateStartOpen(false)} title="Cerrar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <button
+                className="grid cursor-pointer gap-2 rounded-lg border border-[#b9d0cf] bg-[#f8fbfa] p-4 text-left hover:border-brand hover:bg-[#eef6f5]"
+                type="button"
+                onClick={startBlankTemplate}
+                disabled={busy}
+              >
+                <span className="grid size-9 place-items-center rounded-md bg-brand text-white">
+                  <FilePenLine size={19} />
+                </span>
+                <strong>Iniciar desde cero</strong>
+                <span className="text-sm text-muted">Abre una plantilla vacía para crear categorías, pesos y criterios manualmente.</span>
+              </button>
+
+              <div className="grid gap-3 rounded-lg border border-[#e0c9b8] bg-[#fffaf6] p-4">
+                <div className="flex items-start gap-2">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#db6400] text-white">
+                    <Bot size={19} />
+                  </span>
+                  <div>
+                    <strong>Generar con IA</strong>
+                    <p className="text-sm text-muted">Carga un PDF de requisitos o escribe el perfil para crear un borrador editable.</p>
+                  </div>
+                </div>
+                <textarea
+                  className={`${inputClass} min-h-32 resize-y bg-white text-sm`}
+                  placeholder="Pega aquí los requisitos, perfil del cargo, competencias, experiencia requerida o notas de la vacante."
+                  value={templateAiText}
+                  onChange={(event) => setTemplateAiText(event.target.value)}
+                />
+                <label className="grid cursor-pointer gap-1.5 rounded-md border border-dashed border-[#d8b69d] bg-white px-3 py-3 text-sm font-semibold text-[#25464a]">
+                  <span className="flex items-center gap-2">
+                    <FileUp size={17} /> PDF de requisitos
+                  </span>
+                  <input
+                    className="text-sm"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={(event) => setTemplateAiFile(event.target.files?.[0] ?? null)}
+                  />
+                  {templateAiFile ? <span className={mutedTextClass}>{templateAiFile.name}</span> : null}
+                </label>
+                <button className={buttonClass} type="button" onClick={generateTemplateDraftWithAi} disabled={busy || (!templateAiText.trim() && !templateAiFile)}>
+                  <Bot size={18} /> Generar borrador con IA
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 

@@ -4,13 +4,13 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai import evaluate_candidate_with_gemini
+from app.ai import evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User
@@ -186,6 +186,84 @@ def criterion_requires_score_reset(criterion: Criterion, row: dict) -> bool:
 def delete_scores_for_criterion(db: Session, criterion_id: int):
     for score in db.query(Score).filter(Score.criterion_id == criterion_id).all():
         db.delete(score)
+
+
+def normalize_weight_rows(rows: list[dict], weight_key: str) -> list[dict]:
+    if not rows:
+        return rows
+    weights = [max(0.0, float(row.get(weight_key) or 0)) for row in rows]
+    total = sum(weights)
+    if total <= 0:
+        even = 1 / len(rows)
+        for row in rows:
+            row[weight_key] = even
+        return rows
+    for row, weight in zip(rows, weights):
+        row[weight_key] = weight / total
+    return rows
+
+
+def clean_generated_template(raw: dict) -> TemplateCreate:
+    categories = []
+    category_names: set[str] = set()
+    for index, category in enumerate(raw.get("categories") or []):
+        name = str(category.get("name", "")).strip()
+        if not name or name in category_names:
+            continue
+        category_names.add(name)
+        categories.append({"name": name, "weight": category.get("weight", 0), "order_index": index})
+    normalize_weight_rows(categories, "weight")
+
+    criteria = []
+    category_weights = {category["name"]: category["weight"] for category in categories}
+    for index, criterion in enumerate(raw.get("criteria") or []):
+        category = str(criterion.get("category", "")).strip()
+        aspect = str(criterion.get("aspect", "")).strip()
+        if not category or not aspect:
+            continue
+        if category not in category_weights:
+            category_weights[category] = 0
+            categories.append({"name": category, "weight": 0, "order_index": len(categories)})
+        is_critical = bool(criterion.get("is_critical", False))
+        mode = str(criterion.get("evaluation_mode", "manual")).lower()
+        if mode not in {"manual", "automatic"}:
+            mode = "manual"
+        within_weight = 0 if is_critical else max(0.0, float(criterion.get("within_category_weight") or 0))
+        criteria.append(
+            {
+                "code": "",
+                "category": category,
+                "aspect": aspect,
+                "category_weight": category_weights.get(category, 0),
+                "within_category_weight": within_weight,
+                "global_weight": 0,
+                "scale": str(criterion.get("scale") or "0 a 5").strip() or "0 a 5",
+                "notes": str(criterion.get("notes") or "").strip(),
+                "is_critical": is_critical,
+                "evaluation_mode": mode,
+                "order_index": index,
+            }
+        )
+
+    if not categories:
+        categories = [{"name": "Requisitos generales", "weight": 1, "order_index": 0}]
+    normalize_weight_rows(categories, "weight")
+    category_weights = {category["name"]: category["weight"] for category in categories}
+    for category in categories:
+        child_rows = [criterion for criterion in criteria if criterion["category"] == category["name"] and not criterion["is_critical"]]
+        normalize_weight_rows(child_rows, "within_category_weight")
+    for criterion in criteria:
+        criterion["category_weight"] = category_weights.get(criterion["category"], 0)
+        criterion["global_weight"] = 0 if criterion["is_critical"] else criterion["category_weight"] * criterion["within_category_weight"]
+
+    payload = {
+        "name": str(raw.get("name") or "Plantilla generada con IA").strip(),
+        "description": str(raw.get("description") or "Borrador generado con IA a partir de requisitos de la posición.").strip(),
+        "ai_evaluation_locked": bool(raw.get("ai_evaluation_locked", True)),
+        "categories": categories,
+        "criteria": criteria,
+    }
+    return TemplateCreate.model_validate(payload)
 
 
 def sync_template_categories(db: Session):
@@ -423,6 +501,30 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_admin), d
         db.add(Criterion(template_id=template.id, **criterion))
     db.commit()
     return get_template_or_404(db, template.id)
+
+
+@app.post("/templates/generate-ai", response_model=TemplateCreate)
+async def generate_template_ai(
+    requirements_text: str = Form(default=""),
+    requirements_file: UploadFile | None = File(default=None),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    file_bytes = None
+    file_name = None
+    file_mime_type = None
+    if requirements_file and requirements_file.filename:
+        file_mime_type = requirements_file.content_type or "application/octet-stream"
+        if file_mime_type != "application/pdf":
+            raise HTTPException(status_code=400, detail="Por ahora la generación de plantilla acepta requisitos en PDF.")
+        file_bytes = await requirements_file.read()
+        file_name = requirements_file.filename
+    try:
+        api_key, model = get_ai_config(db)
+        raw_template = generate_template_with_gemini(requirements_text, file_name, file_bytes, file_mime_type, api_key, model)
+        return clean_generated_template(raw_template)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.put("/templates/{template_id}", response_model=TemplateOut)

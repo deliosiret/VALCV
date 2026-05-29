@@ -78,3 +78,51 @@ def evaluate_candidate_with_gemini(
     )
     payload = _extract_json(response.text or "{}")
     return payload.get("scores", [])
+
+
+def generate_template_with_gemini(
+    requirements_text: str,
+    file_name: str | None,
+    file_bytes: bytes | None,
+    file_mime_type: str | None,
+    api_key: str | None,
+    model: str,
+) -> dict:
+    if not api_key:
+        raise RuntimeError("Configura la API key de Gemini antes de generar plantillas con IA.")
+    if not requirements_text.strip() and not file_bytes:
+        raise RuntimeError("Carga un PDF o escribe los requisitos de la posición.")
+
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        "Genera una plantilla de evaluación curricular para una vacante técnica a partir de los requisitos suministrados. "
+        "Devuelve únicamente JSON válido con esta forma exacta: "
+        '{"name":"texto","description":"texto","ai_evaluation_locked":true,'
+        '"categories":[{"name":"texto","weight":number,"order_index":number}],'
+        '"criteria":[{"code":"","category":"texto","aspect":"texto","category_weight":number,'
+        '"within_category_weight":number,"global_weight":number,"scale":"0 a 5","notes":"texto",'
+        '"is_critical":boolean,"evaluation_mode":"manual|automatic","order_index":number}]}. '
+        "Los pesos deben ser decimales entre 0 y 1. La suma de categories.weight debe ser 1. "
+        "Dentro de cada categoría, la suma de within_category_weight de criterios no críticos debe ser 1. "
+        "Los criterios críticos son requisitos excluyentes de cumple/no cumple y deben tener within_category_weight 0 y global_weight 0. "
+        "Usa evaluation_mode automatic cuando el criterio pueda inferirse de CV, certificaciones, experiencia documentada o expediente; "
+        "usa manual cuando requiera entrevista, examen temático, validación institucional o juicio experto no plenamente documental. "
+        "En notes escribe instrucciones concretas para evaluar ese criterio, especialmente para criterios automáticos. "
+        "Evita códigos visibles; code puede ir vacío. Crea una plantilla compacta, clara y utilizable, no una tabla copiada. "
+        f"Requisitos escritos: {requirements_text.strip() or 'No suministrados por texto.'}"
+    )
+
+    parts: list = [types.Part.from_text(text=prompt)]
+    if file_bytes:
+        parts.append(types.Part.from_text(text=f"Documento de requisitos: {file_name or 'requisitos.pdf'}"))
+        parts.append(types.Part.from_bytes(data=file_bytes, mime_type=file_mime_type or "application/pdf"))
+
+    response = client.models.generate_content(
+        model=model,
+        contents=[types.Content(role="user", parts=parts)],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
+        ),
+    )
+    return _extract_json(response.text or "{}")
