@@ -22,12 +22,16 @@ TEAL = RGBColor(22, 105, 122)
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo-sie.png"
 
 
+def compact_number(value: float, decimals: int = 2) -> str:
+    return f"{value:.{decimals}f}".rstrip("0").rstrip(".")
+
+
 def percent(value: float) -> str:
-    return f"{round((value or 0) * 100, 2)}%"
+    return f"{compact_number((value or 0) * 100)}%"
 
 
 def score_text(score: float | None) -> str:
-    return "Sin evaluar" if score is None else f"{score:.1f}/5"
+    return "Sin evaluar" if score is None else f"{compact_number(score, 1)}/5"
 
 
 def report_recommendation(value: str) -> str:
