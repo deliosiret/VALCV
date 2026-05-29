@@ -19,7 +19,6 @@ from app.scoring import summarize_candidate
 
 BLUE = RGBColor(37, 70, 74)
 TEAL = RGBColor(22, 105, 122)
-ORANGE = RGBColor(219, 100, 0)
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo-sie.png"
 
 
@@ -130,7 +129,7 @@ def add_cover(document: Document, candidate: Candidate, template: Template, summ
     run.bold = True
     run.font.name = "Aptos"
     run.font.size = Pt(14)
-    run.font.color.rgb = ORANGE
+    run.font.color.rgb = TEAL
 
     rows = [
         ["Plantilla de evaluación", template.name],
@@ -193,6 +192,10 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
 
 def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
     heading(document, "Detalle narrativo de la evaluación")
+    body(
+        document,
+        "Cuando un criterio tenga documentos vinculados, se indicarán al final de su explicación como soporte documental utilizado en la evaluación.",
+    )
     score_by_criterion = {score.criterion_id: score for score in candidate.scores}
     file_names = {file.id: file.original_name for file in candidate.files}
     grouped: dict[str, list[Criterion]] = defaultdict(list)
@@ -211,9 +214,7 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
                 body(document, f"Nota complementaria del evaluador: {score.evaluator_note}")
             references = [file_names.get(file_id, str(file_id)) for file_id in (score.file_ids if score else [])]
             if references:
-                bullet(document, f"Documentos referenciados: {', '.join(references)}")
-            elif score:
-                bullet(document, "No se asociaron documentos específicos a este criterio.")
+                bullet(document, ", ".join(references))
 
 
 def conclusion_text(summary: dict, template: Template) -> str:
