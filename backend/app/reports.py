@@ -166,12 +166,11 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
 
 
 def weights_narrative(document: Document, template: Template, criteria: list[Criterion]) -> None:
-    heading(document, "Criterios y ponderaciones utilizados")
+    heading(document, "Estructura de evaluación")
     body(
         document,
-        "La evaluación se organizó por categorías. Cada categoría tiene un peso dentro del resultado general, y los "
-        "criterios no críticos distribuyen el peso interno de su categoría. Los criterios marcados como críticos no "
-        "aportan ponderación numérica; funcionan como requisitos de cumplimiento obligatorio.",
+        "La evaluación se organizó en categorías con distintos niveles de importancia dentro del resultado final. "
+        "A continuación se presenta la estructura aplicada para valorar el perfil del candidato.",
     )
     grouped: dict[str, list[Criterion]] = defaultdict(list)
     for criterion in criteria:
@@ -183,18 +182,18 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
             body(document, "No se registraron criterios en esta categoría.")
             continue
         for criterion in children:
-            mode = "asistido por IA" if criterion.evaluation_mode == "automatic" else "manual"
-            weight = "criterio crítico, sin ponderación" if criterion.is_critical else f"peso interno {percent(criterion.within_category_weight)}"
-            body(document, f"{criterion.aspect}: {weight}; evaluación {mode}.")
-            if criterion.notes:
-                bullet(document, f"Orientación de evaluación: {criterion.notes}")
+            if criterion.is_critical:
+                body(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
+            else:
+                body(document, f"{criterion.aspect}. Peso relativo dentro de la categoría: {percent(criterion.within_category_weight)}.")
 
 
 def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
-    heading(document, "Detalle narrativo de la evaluación")
+    heading(document, "Análisis por criterio")
     body(
         document,
-        "Cuando un criterio tenga documentos vinculados, se indicarán al final de su explicación como soporte documental utilizado en la evaluación.",
+        "Esta sección resume las puntuaciones y comentarios registrados para cada criterio evaluado. Cuando existan "
+        "documentos vinculados, se listan como soporte documental al final del criterio correspondiente.",
     )
     score_by_criterion = {score.criterion_id: score for score in candidate.scores}
     file_names = {file.id: file.original_name for file in candidate.files}
@@ -206,12 +205,11 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
         heading(document, category, 2)
         for criterion in children:
             score = score_by_criterion.get(criterion.id)
-            mode = "criterio crítico" if criterion.is_critical else ("evaluación asistida por IA" if criterion.evaluation_mode == "automatic" else "evaluación manual")
-            body(document, f"{criterion.aspect}. Tipo: {mode}. Puntuación registrada: {score_text(score.score if score else None)}.")
+            body(document, f"{criterion.aspect}. Puntuación registrada: {score_text(score.score if score else None)}.")
             if score and score.rationale:
-                body(document, f"Evidencia o justificación registrada: {score.rationale}")
+                body(document, f"Comentario de evaluación: {score.rationale}")
             if score and score.evaluator_note:
-                body(document, f"Nota complementaria del evaluador: {score.evaluator_note}")
+                body(document, f"Observación del evaluador: {score.evaluator_note}")
             references = [file_names.get(file_id, str(file_id)) for file_id in (score.file_ids if score else [])]
             if references:
                 bullet(document, ", ".join(references))
