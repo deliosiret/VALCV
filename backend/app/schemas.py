@@ -92,6 +92,7 @@ class ScoreIn(BaseModel):
     criterion_id: int
     score: float = Field(ge=0, le=5)
     rationale: str = ""
+    evaluator_note: str = ""
     file_ids: list[int] = Field(default_factory=list)
 
 
@@ -101,6 +102,7 @@ class ScoreOut(BaseModel):
     score: float
     source: str
     rationale: str
+    evaluator_note: str
     file_ids: list[int] = Field(default_factory=list)
     updated_at: datetime
 

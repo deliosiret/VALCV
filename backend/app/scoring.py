@@ -61,6 +61,7 @@ def upsert_score(
     source: str,
     rationale: str,
     file_ids: list[int] | None = None,
+    evaluator_note: str | None = None,
 ):
     current = (
         db.query(Score)
@@ -71,6 +72,8 @@ def upsert_score(
         current.score = score
         current.source = source
         current.rationale = rationale
+        if evaluator_note is not None:
+            current.evaluator_note = evaluator_note
         if file_ids is not None:
             current.file_references.clear()
             db.flush()
@@ -83,6 +86,7 @@ def upsert_score(
         score=score,
         source=source,
         rationale=rationale,
+        evaluator_note=evaluator_note or "",
     )
     db.add(created)
     db.flush()

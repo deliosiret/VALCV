@@ -44,6 +44,7 @@ def serialize_score(score: Score) -> dict:
         "score": score.score,
         "source": score.source,
         "rationale": score.rationale,
+        "evaluator_note": score.evaluator_note,
         "file_ids": [reference.file_id for reference in score.file_references],
         "updated_at": score.updated_at,
     }
@@ -241,6 +242,10 @@ def ensure_schema():
     if "is_critical" not in criterion_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE criteria ADD COLUMN is_critical BOOLEAN NOT NULL DEFAULT FALSE"))
+    score_columns = {column["name"] for column in inspector.get_columns("scores")}
+    if "evaluator_note" not in score_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE scores ADD COLUMN evaluator_note TEXT NOT NULL DEFAULT ''"))
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
@@ -587,10 +592,28 @@ def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(get
         if not criterion or criterion.template_id != candidate.template_id:
             raise HTTPException(status_code=400, detail="Criterio inválido para este candidato.")
         if template.ai_evaluation_locked and criterion.evaluation_mode == EvaluationMode.automatic:
+            current = (
+                db.query(Score)
+                .filter(Score.candidate_id == candidate_id, Score.criterion_id == item.criterion_id)
+                .first()
+            )
+            if current:
+                current.evaluator_note = item.evaluator_note
+            elif item.evaluator_note.strip():
+                upsert_score(
+                    db,
+                    candidate_id,
+                    item.criterion_id,
+                    item.score,
+                    "automatic",
+                    "",
+                    [],
+                    evaluator_note=item.evaluator_note,
+                )
             continue
         file_ids = clean_file_ids(item.file_ids, valid_file_ids)
         source = "automatic" if criterion.evaluation_mode == EvaluationMode.automatic else "manual"
-        upsert_score(db, candidate_id, item.criterion_id, item.score, source, item.rationale, file_ids)
+        upsert_score(db, candidate_id, item.criterion_id, item.score, source, item.rationale, file_ids, item.evaluator_note)
     db.commit()
     return [serialize_score(score) for score in get_candidate_or_404(db, candidate_id).scores]
 

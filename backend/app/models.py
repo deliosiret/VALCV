@@ -105,6 +105,7 @@ class Score(Base):
     score: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(24), default="manual")
     rationale: Mapped[str] = mapped_column(Text, default="")
+    evaluator_note: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     candidate: Mapped[Candidate] = relationship(back_populates="scores")

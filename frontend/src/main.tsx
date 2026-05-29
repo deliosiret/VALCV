@@ -52,7 +52,8 @@ const inputClass =
 const panelClass = "rounded-lg border border-line bg-surface p-4";
 const headingClass = "mb-3.5 flex items-center gap-2 text-base font-semibold tracking-normal text-ink";
 const mutedTextClass = "block text-xs leading-snug text-muted";
-const aiLockedTitle = "Este criterio fue evaluado por AI y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
+const aiLockedTitle = "Este criterio fue evaluado por IA y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
+const AI_EVALUATOR_NOTE_PLACEHOLDER = "Nota complementaria del evaluador: úsala si el juicio de la IA quedó incompleto o requiere contexto experto adicional.";
 
 function candidateColor(index: number) {
   return COLORS[index % COLORS.length];
@@ -133,6 +134,7 @@ type Score = {
   score: number;
   source: string;
   rationale: string;
+  evaluator_note: string;
   file_ids: number[];
   updated_at: string;
 };
@@ -417,6 +419,7 @@ function App() {
   const [candidateForm, setCandidateForm] = React.useState({ name: "", document_id: "", evaluator: "", comments: "" });
   const [draftScores, setDraftScores] = React.useState<Record<number, number>>({});
   const [draftRationales, setDraftRationales] = React.useState<Record<number, string>>({});
+  const [draftEvaluatorNotes, setDraftEvaluatorNotes] = React.useState<Record<number, string>>({});
   const [draftFileIds, setDraftFileIds] = React.useState<Record<number, number[]>>({});
   const [evaluationDirty, setEvaluationDirty] = React.useState(false);
   const [autosaveState, setAutosaveState] = React.useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -439,7 +442,7 @@ function App() {
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
   const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId) ?? candidates[0];
   const selectedScores = scoreMap(selectedCandidate);
-  const selectedScoreSignature = selectedCandidate?.scores.map((score) => `${score.criterion_id}:${score.score}:${score.updated_at}:${score.file_ids.join(",")}`).join("|") ?? "";
+  const selectedScoreSignature = selectedCandidate?.scores.map((score) => `${score.criterion_id}:${score.score}:${score.updated_at}:${score.evaluator_note}:${score.file_ids.join(",")}`).join("|") ?? "";
   const categories = Array.from(new Set(selectedTemplate?.criteria.map((criterion) => criterion.category) ?? []));
   const criteriaGroups = categories.map((category) => ({
     category,
@@ -490,10 +493,12 @@ function App() {
     if (selectedCandidate) {
       setDraftScores(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.score])));
       setDraftRationales(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.rationale])));
+      setDraftEvaluatorNotes(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.evaluator_note])));
       setDraftFileIds(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.file_ids])));
     } else {
       setDraftScores({});
       setDraftRationales({});
+      setDraftEvaluatorNotes({});
       setDraftFileIds({});
     }
     setEvaluationDirty(false);
@@ -509,6 +514,7 @@ function App() {
           criterion_id: criterion.id,
           score: Number(draftScores[criterion.id] ?? selectedScores.get(criterion.id)?.score ?? 0),
           rationale: draftRationales[criterion.id] ?? selectedScores.get(criterion.id)?.rationale ?? "",
+          evaluator_note: draftEvaluatorNotes[criterion.id] ?? selectedScores.get(criterion.id)?.evaluator_note ?? "",
           file_ids: draftFileIds[criterion.id] ?? selectedScores.get(criterion.id)?.file_ids ?? [],
         }));
         await api(`/candidates/${selectedCandidate.id}/scores`, { method: "POST", body: JSON.stringify(payload) });
@@ -522,7 +528,7 @@ function App() {
       }
     }, 700);
     return () => window.clearTimeout(timeout);
-  }, [evaluationDirty, draftScores, draftRationales, draftFileIds, selectedCandidate?.id, selectedTemplate?.id]);
+  }, [evaluationDirty, draftScores, draftRationales, draftEvaluatorNotes, draftFileIds, selectedCandidate?.id, selectedTemplate?.id]);
 
   async function createCandidate(event: React.FormEvent) {
     event.preventDefault();
@@ -616,6 +622,7 @@ function App() {
         criterion_id: criterion.id,
         score: Number(draftScores[criterion.id] ?? selectedScores.get(criterion.id)?.score ?? 0),
         rationale: draftRationales[criterion.id] ?? selectedScores.get(criterion.id)?.rationale ?? "",
+        evaluator_note: draftEvaluatorNotes[criterion.id] ?? selectedScores.get(criterion.id)?.evaluator_note ?? "",
         file_ids: draftFileIds[criterion.id] ?? selectedScores.get(criterion.id)?.file_ids ?? [],
       }));
       await api(`/candidates/${selectedCandidate.id}/scores`, { method: "POST", body: JSON.stringify(payload) });
@@ -683,6 +690,7 @@ function App() {
       await api<Candidate>(`/candidates/${selectedCandidate.id}/reset`, { method: "POST" });
       setDraftScores({});
       setDraftRationales({});
+      setDraftEvaluatorNotes({});
       setDraftFileIds({});
       setNotice("Evaluación limpiada");
       await load();
@@ -1471,6 +1479,7 @@ function App() {
                           const isAutomatic = criterion.evaluation_mode === "automatic";
                           const isAiLocked = isAutomatic && selectedTemplate?.ai_evaluation_locked !== false;
                           const currentScore = draftScores[criterion.id] ?? current?.score ?? 0;
+                          const evaluatorNote = draftEvaluatorNotes[criterion.id] ?? current?.evaluator_note ?? "";
                           return (
                             <article className={`grid gap-2 rounded-md border border-[#e5eeee] border-l-4 bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)] ${criterion.is_critical ? "border-l-[#9a3412]" : "border-l-[#db6400]"}`} key={criterion.id}>
                               <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_210px] lg:items-center">
@@ -1537,6 +1546,23 @@ function App() {
                                   markEvaluationDirty();
                                 }}
                               />
+                              {isAutomatic ? (
+                                <div className="grid gap-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-semibold text-[#25464a]">Nota complementaria del evaluador</span>
+                                    <span className="rounded-full bg-[#f4e8de] px-1.5 py-0.5 text-[10px] font-bold text-[#9a3412]">Editable</span>
+                                  </div>
+                                  <textarea
+                                    className={`${inputClass} min-h-16 resize-y border-[#e0c9b8] bg-[#fffaf6] text-sm focus:border-[#db6400] focus:ring-[#db6400]/15`}
+                                    placeholder={AI_EVALUATOR_NOTE_PLACEHOLDER}
+                                    value={evaluatorNote}
+                                    onChange={(event) => {
+                                      setDraftEvaluatorNotes({ ...draftEvaluatorNotes, [criterion.id]: event.target.value });
+                                      markEvaluationDirty();
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
                               {selectedCandidate.files.length ? (
                                 <div className="flex flex-wrap gap-1.5">
                                   {selectedCandidate.files.map((file) => (
