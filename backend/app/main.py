@@ -2,11 +2,12 @@ import hashlib
 import secrets
 import shutil
 import uuid
+import unicodedata
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, selectinload
 
@@ -14,6 +15,7 @@ from app.ai import evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
+from app.reports import build_candidate_report
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
@@ -60,6 +62,12 @@ def clean_file_ids(raw_file_ids, valid_file_ids: set[int]) -> list[int]:
         if file_id in valid_file_ids:
             cleaned.append(file_id)
     return list(dict.fromkeys(cleaned))
+
+
+def safe_filename(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    cleaned = "".join(char if char.isalnum() else "_" for char in normalized).strip("_")
+    return cleaned or "reporte"
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -771,6 +779,25 @@ def view_candidate_file(candidate_id: int, file_id: int, token: str = Query(...)
         media_type=candidate_file.mime_type,
         filename=candidate_file.original_name,
         content_disposition_type="inline",
+    )
+
+
+@app.get("/candidates/{candidate_id}/report")
+def candidate_report(candidate_id: int, _: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
+    candidate = get_candidate_or_404(db, candidate_id)
+    template = get_template_or_404(db, candidate.template_id)
+    criteria = (
+        db.query(Criterion)
+        .filter(Criterion.template_id == candidate.template_id)
+        .order_by(Criterion.order_index)
+        .all()
+    )
+    report = build_candidate_report(candidate, template, criteria)
+    filename = f"reporte_evaluacion_{safe_filename(candidate.name)}.docx"
+    return StreamingResponse(
+        report,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

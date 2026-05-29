@@ -837,6 +837,34 @@ function App() {
     }
   }
 
+  async function downloadCandidateReport() {
+    if (!selectedCandidate) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_URL}/candidates/${selectedCandidate.id}/report`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("valcv_token") ?? ""}` },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(error.detail ?? "No se pudo generar el reporte");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `reporte_evaluacion_${selectedCandidate.name.replace(/[^a-z0-9]+/gi, "_")}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice("Reporte generado");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo generar el reporte");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAiSettings(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -1699,7 +1727,7 @@ function App() {
             <h2 className={headingClass}><Bot size={18} /> Expediente y evaluación</h2>
             {selectedCandidate ? (
               <>
-                <div className="grid items-stretch gap-2.5 border-b border-[#e5eeee] pb-3.5 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto] md:items-center">
+                <div className="grid items-stretch gap-2.5 border-b border-[#e5eeee] pb-3.5 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto] md:items-center">
                   <div>
                     <strong>{selectedCandidate.name}</strong>
                     <span className={mutedTextClass}>
@@ -1715,6 +1743,9 @@ function App() {
                   </button>
                   <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy || !canEvaluateCandidates} title="Limpiar evaluación">
                     <RotateCcw size={18} /> Limpiar
+                  </button>
+                  <button className={`${buttonClass} bg-[#486366]`} onClick={downloadCandidateReport} disabled={busy} title="Generar reporte en Word">
+                    <FileText size={18} /> Reporte
                   </button>
                 </div>
                 <div className="my-3 flex flex-wrap gap-2">
