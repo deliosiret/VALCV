@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models import EvaluationMode
+from app.models import EvaluationMode, UserRole
 
 
 class CriterionIn(BaseModel):
@@ -64,7 +64,6 @@ class TemplateOut(BaseModel):
 class CandidateCreate(BaseModel):
     name: str
     document_id: str = ""
-    evaluator: str = ""
     comments: str = ""
     template_id: int
 
@@ -116,6 +115,7 @@ class CandidateOut(BaseModel):
     name: str
     document_id: str
     evaluator: str
+    evaluator_user_id: int | None = None
     comments: str
     created_at: datetime
     files: list[FileOut]
@@ -158,13 +158,23 @@ class LoginIn(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
-    is_admin: bool = False
-    can_view_all: bool = True
+    first_name: str = ""
+    last_name: str = ""
+    position: str = ""
+    area: str = ""
+    employee_code: str = ""
+    role: UserRole = UserRole.evaluator
 
 
 class UserOut(BaseModel):
     id: int
     username: str
+    first_name: str = ""
+    last_name: str = ""
+    position: str = ""
+    area: str = ""
+    employee_code: str = ""
+    role: UserRole = UserRole.evaluator
     is_admin: bool
     can_view_all: bool
     is_active: bool

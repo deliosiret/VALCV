@@ -85,6 +85,23 @@ function ignoreNumberWheel(event: React.WheelEvent<HTMLInputElement>) {
 }
 
 type Mode = "manual" | "automatic";
+type UserRole = "administrator" | "template_manager" | "evaluator" | "hr" | "viewer";
+
+const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = [
+  { value: "administrator", label: "Administrador", description: "Gestiona usuarios, IA, plantillas, candidatos y resultados." },
+  { value: "template_manager", label: "Gestor de plantillas", description: "Crea y edita plantillas; consulta resultados." },
+  { value: "evaluator", label: "Evaluador", description: "Crea candidatos, carga expedientes y evalúa." },
+  { value: "hr", label: "Recursos Humanos", description: "Crea y administra candidatos; consulta resultados." },
+  { value: "viewer", label: "Consulta", description: "Solo consulta plantillas y resultados." },
+];
+
+const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
+  administrator: ["manage_users", "manage_ai_settings", "manage_templates", "manage_candidates", "evaluate_candidates", "view_results"],
+  template_manager: ["manage_templates", "view_results"],
+  evaluator: ["manage_candidates", "evaluate_candidates", "view_results"],
+  hr: ["manage_candidates", "view_results"],
+  viewer: ["view_results"],
+};
 
 type Criterion = {
   id: number;
@@ -145,6 +162,7 @@ type Candidate = {
   name: string;
   document_id: string;
   evaluator: string;
+  evaluator_user_id?: number | null;
   comments: string;
   files: { id: number; original_name: string; mime_type: string; size_bytes: number }[];
   scores: Score[];
@@ -168,10 +186,29 @@ type AISettings = {
 type User = {
   id: number;
   username: string;
+  first_name: string;
+  last_name: string;
+  position: string;
+  area: string;
+  employee_code: string;
+  role: UserRole;
   is_admin: boolean;
   can_view_all: boolean;
   is_active: boolean;
 };
+
+function roleLabel(role: UserRole) {
+  return ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role;
+}
+
+function userFullName(user?: User | null) {
+  return [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim() || user?.username || "";
+}
+
+function hasPermission(user: User | null, permission: string) {
+  if (!user) return false;
+  return user.is_admin || ROLE_PERMISSIONS[user.role]?.includes(permission);
+}
 
 function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem("valcv_token");
@@ -322,10 +359,10 @@ function ModeToggle({ value, onChange }: { value: Mode; onChange: (value: Mode) 
       }`}
       type="button"
       onClick={() => onChange(active ? "manual" : "automatic")}
-      title={active ? "Evaluación con AI" : "Evaluación manual"}
+      title={active ? "Evaluación con IA" : "Evaluación manual"}
     >
       <span className={`grid size-6 place-items-center rounded-full bg-white shadow-sm transition ${active ? "translate-x-5 text-brand" : "translate-x-0 text-[#8aa0a1]"}`}>
-        AI
+        IA
       </span>
     </button>
   );
@@ -410,13 +447,13 @@ function App() {
   const [user, setUser] = React.useState<User | null>(null);
   const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
   const [users, setUsers] = React.useState<User[]>([]);
-  const [userForm, setUserForm] = React.useState({ username: "", password: "", is_admin: false, can_view_all: true });
+  const [userForm, setUserForm] = React.useState({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole });
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [summary, setSummary] = React.useState<SummaryCandidate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = React.useState<number | null>(null);
-  const [candidateForm, setCandidateForm] = React.useState({ name: "", document_id: "", evaluator: "", comments: "" });
+  const [candidateForm, setCandidateForm] = React.useState({ name: "", document_id: "", comments: "" });
   const [draftScores, setDraftScores] = React.useState<Record<number, number>>({});
   const [draftRationales, setDraftRationales] = React.useState<Record<number, string>>({});
   const [draftEvaluatorNotes, setDraftEvaluatorNotes] = React.useState<Record<number, string>>({});
@@ -443,6 +480,11 @@ function App() {
   const [busy, setBusy] = React.useState(false);
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
+  const canManageUsers = hasPermission(user, "manage_users");
+  const canManageAiSettings = hasPermission(user, "manage_ai_settings");
+  const canManageTemplates = hasPermission(user, "manage_templates");
+  const canManageCandidates = hasPermission(user, "manage_candidates");
+  const canEvaluateCandidates = hasPermission(user, "evaluate_candidates");
   const filteredCandidates = selectedTemplate ? candidates.filter((candidate) => candidate.template_id === selectedTemplate.id) : [];
   const selectedCandidate = filteredCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? filteredCandidates[0];
   const selectedScores = scoreMap(selectedCandidate);
@@ -506,10 +548,10 @@ function App() {
   }, [token, selectedTemplate?.id, candidates]);
 
   React.useEffect(() => {
-    if (settingsOpen && user?.is_admin) {
+    if (settingsOpen && canManageUsers) {
       api<User[]>("/users").then(setUsers).catch((error) => setNotice(error.message));
     }
-  }, [settingsOpen, user?.is_admin]);
+  }, [settingsOpen, canManageUsers]);
 
   React.useEffect(() => {
     if (selectedCandidate) {
@@ -561,7 +603,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({ ...candidateForm, template_id: selectedTemplate.id }),
       });
-      setCandidateForm({ name: "", document_id: "", evaluator: "", comments: "" });
+      setCandidateForm({ name: "", document_id: "", comments: "" });
       setSelectedCandidateId(created.id);
       setNotice("Candidato creado");
       await load();
@@ -605,7 +647,7 @@ function App() {
     setBusy(true);
     try {
       await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
-      setUserForm({ username: "", password: "", is_admin: false, can_view_all: true });
+      setUserForm({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" });
       setUsers(await api<User[]>("/users"));
       setNotice("Usuario creado");
     } catch (error) {
@@ -1038,16 +1080,16 @@ function App() {
               </option>
             ))}
           </select>
-          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("edit")} disabled={busy || !selectedTemplate} title="Editar plantilla">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => openTemplateEditor("edit")} disabled={busy || !selectedTemplate || !canManageTemplates} title="Editar plantilla">
             <FilePenLine size={18} />
           </button>
-          <button className={`${buttonClass} px-2 md:px-3`} onClick={openNewTemplateFlow} disabled={busy} title="Nueva plantilla">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={openNewTemplateFlow} disabled={busy || !canManageTemplates} title="Nueva plantilla">
             <Plus size={18} />
           </button>
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => load()} disabled={busy} title="Actualizar">
             <RefreshCw size={18} />
           </button>
-          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy} title="Configuración">
+          <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy || (!canManageAiSettings && !canManageUsers)} title="Configuración">
             <Settings size={18} />
           </button>
           <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={logout} disabled={busy} title="Cerrar sesión">
@@ -1140,7 +1182,7 @@ function App() {
                 </small>
               </div>
 
-              {user.is_admin ? (
+              {canManageUsers ? (
                 <section className="mt-2 grid gap-3 border-t border-line pt-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <Users size={17} /> Usuarios
@@ -1148,28 +1190,31 @@ function App() {
                   <div className="grid gap-2">
                     {users.map((row) => (
                       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
-                        <strong>{row.username}</strong>
-                        <span className={mutedTextClass}>{row.is_admin ? "Administrador" : "Usuario"} · {row.can_view_all ? "ve resultados" : "sin resultados"}</span>
+                        <strong>{userFullName(row)}</strong>
+                        <span className={mutedTextClass}>
+                          {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
+                        </span>
                       </div>
                     ))}
                   </div>
-                  <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                  <div className="grid gap-2 md:grid-cols-2">
                     <input className={inputClass} placeholder="Usuario" value={userForm.username} onChange={(event) => setUserForm({ ...userForm, username: event.target.value })} />
                     <input className={inputClass} type="password" placeholder="Contraseña" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
-                    <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
-                      <Plus size={18} /> Usuario
-                    </button>
+                    <input className={inputClass} placeholder="Nombre" value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} />
+                    <input className={inputClass} placeholder="Apellido" value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} />
+                    <input className={inputClass} placeholder="Cargo" value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} />
+                    <input className={inputClass} placeholder="Área" value={userForm.area} onChange={(event) => setUserForm({ ...userForm, area: event.target.value })} />
+                    <input className={inputClass} placeholder="Código de empleado" value={userForm.employee_code} onChange={(event) => setUserForm({ ...userForm, employee_code: event.target.value })} />
+                    <select className={inputClass} value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })}>
+                      {ROLE_OPTIONS.map((role) => (
+                        <option key={role.value} value={role.value}>{role.label}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="flex flex-wrap gap-3 text-sm">
-                    <label className="inline-flex items-center gap-2">
-                      <input type="checkbox" checked={userForm.is_admin} onChange={(event) => setUserForm({ ...userForm, is_admin: event.target.checked })} />
-                      Admin
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input type="checkbox" checked={userForm.can_view_all} onChange={(event) => setUserForm({ ...userForm, can_view_all: event.target.checked })} />
-                      Ver todos los resultados
-                    </label>
-                  </div>
+                  <small className={mutedTextClass}>{ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}</small>
+                  <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
+                    <Plus size={18} /> Crear usuario
+                  </button>
                 </section>
               ) : null}
 
@@ -1304,7 +1349,7 @@ function App() {
                   checked={templateDraft.ai_evaluation_locked}
                   onChange={(event) => setTemplateDraft({ ...templateDraft, ai_evaluation_locked: event.target.checked })}
                 />
-                Bloquear edición manual de puntuación, evidencia y documentos en criterios AI
+                Bloquear edición manual de puntuación, evidencia y documentos en criterios IA
               </label>
 
               <section className="grid gap-3">
@@ -1445,22 +1490,24 @@ function App() {
 
       <div className="grid gap-4 p-3 lg:grid-cols-[320px_minmax(0,1fr)] lg:p-4.5">
         <aside className="grid content-start gap-4 lg:block lg:space-y-4 xl:grid xl:grid-cols-1">
-          <form onSubmit={createCandidate} className={`${panelClass} grid gap-2.5`}>
-            <h2 className={headingClass}><UserRoundPlus size={18} /> Nuevo candidato</h2>
-            <input className={inputClass} placeholder="Nombre" value={candidateForm.name} onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })} required />
-            <input className={inputClass} placeholder="Cédula/ID" value={candidateForm.document_id} onChange={(e) => setCandidateForm({ ...candidateForm, document_id: e.target.value })} />
-            <input className={inputClass} placeholder="Evaluador" value={candidateForm.evaluator} onChange={(e) => setCandidateForm({ ...candidateForm, evaluator: e.target.value })} />
-            <textarea className={`${inputClass} min-h-20 resize-y`} placeholder="Comentarios" value={candidateForm.comments} onChange={(e) => setCandidateForm({ ...candidateForm, comments: e.target.value })} />
-            <button className={buttonClass} type="submit" disabled={busy || !selectedTemplate}>
-              <Plus size={18} /> Crear
-            </button>
-          </form>
+          {canManageCandidates ? (
+            <form onSubmit={createCandidate} className={`${panelClass} grid gap-2.5`}>
+              <h2 className={headingClass}><UserRoundPlus size={18} /> Nuevo candidato</h2>
+              <input className={inputClass} placeholder="Nombre" value={candidateForm.name} onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })} required />
+              <input className={inputClass} placeholder="Cédula/ID" value={candidateForm.document_id} onChange={(e) => setCandidateForm({ ...candidateForm, document_id: e.target.value })} />
+              <textarea className={`${inputClass} min-h-20 resize-y`} placeholder="Comentarios" value={candidateForm.comments} onChange={(e) => setCandidateForm({ ...candidateForm, comments: e.target.value })} />
+              <span className={mutedTextClass}>Evaluador asignado: {userFullName(user)}</span>
+              <button className={buttonClass} type="submit" disabled={busy || !selectedTemplate}>
+                <Plus size={18} /> Crear
+              </button>
+            </form>
+          ) : null}
 
           <div className={`${panelClass} grid gap-2.5`}>
             <h2 className={headingClass}><Gauge size={18} /> Candidatos</h2>
             {filteredCandidates.map((candidate) => (
               <div
-                className={`grid grid-cols-[minmax(0,1fr)_36px] items-stretch gap-1 rounded-md border p-1 ${
+                className={`grid ${canManageCandidates ? "grid-cols-[minmax(0,1fr)_36px]" : "grid-cols-1"} items-stretch gap-1 rounded-md border p-1 ${
                   candidate.id === selectedCandidate?.id ? "border-brand bg-brand" : "border-line bg-[#f8fbfa]"
                 }`}
                 key={candidate.id}
@@ -1475,17 +1522,19 @@ function App() {
                   <strong className="truncate">{candidate.name}</strong>
                   <span className={candidate.id === selectedCandidate?.id ? "block truncate text-xs leading-snug text-[#dceff0]" : mutedTextClass}>{candidate.document_id || "Sin ID"}</span>
                 </button>
-                <button
-                  className={`grid size-9 cursor-pointer place-items-center rounded-md ${
-                    candidate.id === selectedCandidate?.id ? "bg-white/15 text-white hover:bg-white/25" : "bg-[#eef6f5] text-[#9a3412] hover:bg-[#e3efed]"
-                  }`}
-                  type="button"
-                  onClick={() => deleteCandidate(candidate.id)}
-                  disabled={busy}
-                  title="Eliminar candidato"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {canManageCandidates ? (
+                  <button
+                    className={`grid size-9 cursor-pointer place-items-center rounded-md ${
+                      candidate.id === selectedCandidate?.id ? "bg-white/15 text-white hover:bg-white/25" : "bg-[#eef6f5] text-[#9a3412] hover:bg-[#e3efed]"
+                    }`}
+                    type="button"
+                    onClick={() => deleteCandidate(candidate.id)}
+                    disabled={busy}
+                    title="Eliminar candidato"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1548,14 +1597,14 @@ function App() {
                       {selectedCandidate.files.length} archivo(s) cargado(s) · {autosaveState === "saving" ? "guardando..." : autosaveState === "saved" ? "guardado" : autosaveState === "error" ? "error al guardar" : "autoguardado"}
                     </span>
                   </div>
-                  <label className={buttonClass} title="Cargar PDF o imagen">
+                  <label className={`${buttonClass} ${!canEvaluateCandidates ? "pointer-events-none opacity-55" : ""}`} title="Cargar PDF o imagen">
                     <FileUp size={18} />
-                    <input className="hidden" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />
+                    <input className="hidden" type="file" multiple disabled={!canEvaluateCandidates} accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />
                   </label>
-                  <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0} title="Evaluar criterios automáticos con IA">
+                  <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0 || !canEvaluateCandidates} title="Evaluar criterios automáticos con IA">
                     <Bot size={18} /> Evaluar con IA
                   </button>
-                  <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy} title="Limpiar evaluación">
+                  <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy || !canEvaluateCandidates} title="Limpiar evaluación">
                     <RotateCcw size={18} /> Limpiar
                   </button>
                 </div>
@@ -1578,7 +1627,7 @@ function App() {
                         className="grid size-5 cursor-pointer place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
                         type="button"
                         onClick={() => deleteFile(file.id)}
-                        disabled={busy}
+                        disabled={busy || !canEvaluateCandidates}
                         title="Eliminar documento"
                       >
                         <X size={14} />
@@ -1604,7 +1653,7 @@ function App() {
                           const current = selectedScores.get(criterion.id);
                           const referencedFileIds = draftFileIds[criterion.id] ?? current?.file_ids ?? [];
                           const isAutomatic = criterion.evaluation_mode === "automatic";
-                          const isAiLocked = isAutomatic && selectedTemplate?.ai_evaluation_locked !== false;
+                          const isAiLocked = !canEvaluateCandidates || (isAutomatic && selectedTemplate?.ai_evaluation_locked !== false);
                           const currentScore = draftScores[criterion.id] ?? current?.score ?? 0;
                           const evaluatorNote = draftEvaluatorNotes[criterion.id] ?? current?.evaluator_note ?? "";
                           return (
@@ -1616,7 +1665,7 @@ function App() {
                                     <strong className="min-w-0 text-sm leading-tight">{criterion.aspect}</strong>
                                     {isAutomatic ? (
                                       <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#e6f1ef] px-1.5 text-[10px] font-bold leading-none text-brand">
-                                        AI
+                                        IA
                                       </span>
                                     ) : null}
                                     {isAutomatic ? (
@@ -1624,7 +1673,7 @@ function App() {
                                         className="inline-flex min-h-6 shrink-0 cursor-pointer items-center rounded-full border border-[#b9d0cf] bg-white px-2 text-[10px] font-bold leading-none text-brand hover:bg-[#e6f1ef] disabled:cursor-not-allowed disabled:opacity-50"
                                         type="button"
                                         onClick={() => runCriterionAi(criterion)}
-                                        disabled={busy || selectedCandidate.files.length === 0}
+                                        disabled={busy || selectedCandidate.files.length === 0 || !canEvaluateCandidates}
                                         title="Reevaluar solo este criterio con IA"
                                       >
                                         Reevaluar
@@ -1682,6 +1731,7 @@ function App() {
                                   <textarea
                                     className={`${inputClass} min-h-16 resize-y border-[#e0c9b8] bg-[#fffaf6] text-sm focus:border-[#db6400] focus:ring-[#db6400]/15`}
                                     placeholder={AI_EVALUATOR_NOTE_PLACEHOLDER}
+                                    disabled={!canEvaluateCandidates}
                                     value={evaluatorNote}
                                     onChange={(event) => {
                                       setDraftEvaluatorNotes({ ...draftEvaluatorNotes, [criterion.id]: event.target.value });

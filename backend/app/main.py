@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai import evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User
+from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
@@ -89,10 +89,46 @@ def get_current_user(authorization: str | None = Header(default=None), db: Sessi
     return authenticate_token(db, authorization.removeprefix("Bearer ").strip())
 
 
+ROLE_PERMISSIONS = {
+    UserRole.administrator: {
+        "manage_users",
+        "manage_ai_settings",
+        "manage_templates",
+        "manage_candidates",
+        "evaluate_candidates",
+        "view_results",
+    },
+    UserRole.template_manager: {"manage_templates", "view_results"},
+    UserRole.evaluator: {"manage_candidates", "evaluate_candidates", "view_results"},
+    UserRole.hr: {"manage_candidates", "view_results"},
+    UserRole.viewer: {"view_results"},
+}
+
+
+def user_permissions(user: User) -> set[str]:
+    if user.is_admin:
+        return ROLE_PERMISSIONS[UserRole.administrator]
+    return ROLE_PERMISSIONS.get(user.role, set())
+
+
+def require_permission(permission: str):
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if permission not in user_permissions(user):
+            raise HTTPException(status_code=403, detail="No tienes permiso para realizar esta acción.")
+        return user
+
+    return dependency
+
+
 def require_admin(user: User = Depends(get_current_user)) -> User:
-    if not user.is_admin:
+    if "manage_users" not in user_permissions(user):
         raise HTTPException(status_code=403, detail="Solo un usuario administrador puede realizar esta acción.")
     return user
+
+
+def user_display_name(user: User) -> str:
+    full_name = " ".join(part for part in [user.first_name, user.last_name] if part).strip()
+    return full_name or user.username
 
 
 def seed_admin_user(db: Session):
@@ -103,6 +139,12 @@ def seed_admin_user(db: Session):
         User(
             username=settings.admin_username,
             password_hash=hash_password(settings.admin_password),
+            first_name="Administrador",
+            last_name="",
+            position="Administrador de plataforma",
+            area="Sistema",
+            employee_code="",
+            role=UserRole.administrator,
             is_admin=True,
             can_view_all=True,
             is_active=True,
@@ -312,6 +354,15 @@ def startup():
 
 def ensure_schema():
     inspector = inspect(engine)
+    enum_values = ", ".join(f"'{role.value}'" for role in UserRole)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "DO $$ BEGIN "
+                f"CREATE TYPE user_role AS ENUM ({enum_values}); "
+                "EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+            )
+        )
     template_columns = {column["name"] for column in inspector.get_columns("templates")}
     if "ai_evaluation_locked" not in template_columns:
         with engine.begin() as connection:
@@ -324,6 +375,27 @@ def ensure_schema():
     if "evaluator_note" not in score_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE scores ADD COLUMN evaluator_note TEXT NOT NULL DEFAULT ''"))
+    candidate_columns = {column["name"] for column in inspector.get_columns("candidates")}
+    if "evaluator_user_id" not in candidate_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE candidates ADD COLUMN evaluator_user_id INTEGER REFERENCES users(id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_candidates_evaluator_user_id ON candidates(evaluator_user_id)"))
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    user_column_defaults = {
+        "first_name": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "last_name": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "position": "VARCHAR(140) NOT NULL DEFAULT ''",
+        "area": "VARCHAR(160) NOT NULL DEFAULT ''",
+        "employee_code": "VARCHAR(60) NOT NULL DEFAULT ''",
+        "role": "user_role NOT NULL DEFAULT 'evaluator'",
+    }
+    for column_name, definition in user_column_defaults.items():
+        if column_name not in user_columns:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {definition}"))
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE users SET role = 'administrator' WHERE is_admin = TRUE"))
+        connection.execute(text("UPDATE users SET role = 'viewer' WHERE is_admin = FALSE AND can_view_all = TRUE AND role = 'evaluator'"))
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
@@ -441,8 +513,14 @@ def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Sessi
     user = User(
         username=username,
         password_hash=hash_password(payload.password),
-        is_admin=payload.is_admin,
-        can_view_all=payload.can_view_all,
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        position=payload.position.strip(),
+        area=payload.area.strip(),
+        employee_code=payload.employee_code.strip(),
+        role=payload.role,
+        is_admin=payload.role == UserRole.administrator,
+        can_view_all="view_results" in ROLE_PERMISSIONS.get(payload.role, set()),
         is_active=True,
     )
     db.add(user)
@@ -462,7 +540,7 @@ def read_ai_settings(_: User = Depends(get_current_user), db: Session = Depends(
 
 
 @app.put("/settings/ai", response_model=AISettingsOut)
-def save_ai_settings(payload: AISettingsIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def save_ai_settings(payload: AISettingsIn, _: User = Depends(require_permission("manage_ai_settings")), db: Session = Depends(get_db)):
     model = payload.gemini_model.strip()
     if not model:
         raise HTTPException(status_code=400, detail="Selecciona un modelo de Gemini.")
@@ -489,7 +567,7 @@ def list_templates(_: User = Depends(get_current_user), db: Session = Depends(ge
 
 
 @app.post("/templates", response_model=TemplateOut)
-def create_template(payload: TemplateCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def create_template(payload: TemplateCreate, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
     template = Template(name=payload.name, description=payload.description, ai_evaluation_locked=payload.ai_evaluation_locked)
     db.add(template)
     db.flush()
@@ -507,7 +585,7 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_admin), d
 async def generate_template_ai(
     requirements_text: str = Form(default=""),
     requirements_file: UploadFile | None = File(default=None),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_permission("manage_templates")),
     db: Session = Depends(get_db),
 ):
     file_bytes = None
@@ -528,7 +606,7 @@ async def generate_template_ai(
 
 
 @app.put("/templates/{template_id}", response_model=TemplateOut)
-def replace_template(template_id: int, payload: TemplateCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def replace_template(template_id: int, payload: TemplateCreate, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
     template = get_template_or_404(db, template_id)
     template.name = payload.name
     template.description = payload.description
@@ -561,7 +639,7 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
 
 
 @app.patch("/criteria/{criterion_id}", response_model=TemplateOut)
-def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
     if not criterion:
         raise HTTPException(status_code=404, detail="Criterio no encontrado")
@@ -583,9 +661,7 @@ def update_criterion(criterion_id: int, payload: CriterionIn, _: User = Depends(
 
 
 @app.get("/candidates", response_model=list[CandidateOut])
-def list_candidates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not user.can_view_all:
-        raise HTTPException(status_code=403, detail="Este usuario no puede ver resultados.")
+def list_candidates(_: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     return (
         db.query(Candidate)
         .options(selectinload(Candidate.files), selectinload(Candidate.scores).selectinload(Score.file_references))
@@ -595,16 +671,16 @@ def list_candidates(user: User = Depends(get_current_user), db: Session = Depend
 
 
 @app.post("/candidates", response_model=CandidateOut)
-def create_candidate(payload: CandidateCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_candidate(payload: CandidateCreate, user: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     get_template_or_404(db, payload.template_id)
-    candidate = Candidate(**payload.model_dump())
+    candidate = Candidate(**payload.model_dump(), evaluator=user_display_name(user), evaluator_user_id=user.id)
     db.add(candidate)
     db.commit()
     return get_candidate_or_404(db, candidate.id)
 
 
 @app.patch("/candidates/{candidate_id}", response_model=CandidateOut)
-def update_candidate(candidate_id: int, payload: CandidatePatch, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def update_candidate(candidate_id: int, payload: CandidatePatch, _: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(candidate, key, value)
@@ -613,7 +689,7 @@ def update_candidate(candidate_id: int, payload: CandidatePatch, _: User = Depen
 
 
 @app.delete("/candidates/{candidate_id}")
-def delete_candidate(candidate_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_candidate(candidate_id: int, _: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     delete_uploaded_files(candidate.files)
     db.delete(candidate)
@@ -622,7 +698,7 @@ def delete_candidate(candidate_id: int, _: User = Depends(require_admin), db: Se
 
 
 @app.post("/candidates/{candidate_id}/reset", response_model=CandidateOut)
-def reset_candidate_evaluation(candidate_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def reset_candidate_evaluation(candidate_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     delete_uploaded_files(candidate.files)
     candidate.files.clear()
@@ -632,7 +708,7 @@ def reset_candidate_evaluation(candidate_id: int, _: User = Depends(get_current_
 
 
 @app.post("/candidates/{candidate_id}/files", response_model=CandidateOut)
-def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     allowed = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
     upload_path = Path(settings.upload_dir)
@@ -661,7 +737,7 @@ def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...
 
 
 @app.delete("/candidates/{candidate_id}/files/{file_id}", response_model=CandidateOut)
-def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate_file = get_candidate_file_or_404(db, candidate_id, file_id)
     delete_uploaded_files([candidate_file])
     db.delete(candidate_file)
@@ -685,7 +761,7 @@ def view_candidate_file(candidate_id: int, file_id: int, token: str = Query(...)
 
 
 @app.post("/candidates/{candidate_id}/scores", response_model=list[ScoreOut])
-def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
@@ -721,7 +797,7 @@ def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(get
 
 
 @app.post("/candidates/{candidate_id}/evaluate-ai", response_model=CandidateOut)
-def evaluate_ai(candidate_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
@@ -748,7 +824,7 @@ def evaluate_ai(candidate_id: int, _: User = Depends(get_current_user), db: Sess
 
 
 @app.post("/candidates/{candidate_id}/criteria/{criterion_id}/evaluate-ai", response_model=CandidateOut)
-def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
     if not criterion or criterion.template_id != candidate.template_id:
@@ -773,9 +849,7 @@ def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User =
 
 
 @app.get("/summary", response_model=SummaryOut)
-def summary(template_id: int | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not user.can_view_all:
-        raise HTTPException(status_code=403, detail="Este usuario no puede ver resultados.")
+def summary(template_id: int | None = None, user: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     query = db.query(Candidate).options(selectinload(Candidate.scores))
     if template_id:
         query = query.filter(Candidate.template_id == template_id)

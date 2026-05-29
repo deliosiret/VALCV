@@ -12,6 +12,14 @@ class EvaluationMode(str, Enum):
     automatic = "automatic"
 
 
+class UserRole(str, Enum):
+    administrator = "administrator"
+    template_manager = "template_manager"
+    evaluator = "evaluator"
+    hr = "hr"
+    viewer = "viewer"
+
+
 class Template(Base):
     __tablename__ = "templates"
 
@@ -74,10 +82,12 @@ class Candidate(Base):
     name: Mapped[str] = mapped_column(String(180))
     document_id: Mapped[str] = mapped_column(String(80), default="")
     evaluator: Mapped[str] = mapped_column(String(120), default="")
+    evaluator_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     comments: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     template: Mapped[Template] = relationship(back_populates="candidates")
+    evaluator_user: Mapped["User | None"] = relationship(foreign_keys=[evaluator_user_id])
     files: Mapped[list["CandidateFile"]] = relationship(back_populates="candidate", cascade="all, delete-orphan")
     scores: Mapped[list["Score"]] = relationship(back_populates="candidate", cascade="all, delete-orphan")
 
@@ -145,6 +155,12 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(220))
+    first_name: Mapped[str] = mapped_column(String(80), default="")
+    last_name: Mapped[str] = mapped_column(String(80), default="")
+    position: Mapped[str] = mapped_column(String(140), default="")
+    area: Mapped[str] = mapped_column(String(160), default="")
+    employee_code: Mapped[str] = mapped_column(String(60), default="")
+    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, name="user_role"), default=UserRole.evaluator)
     is_admin: Mapped[bool] = mapped_column(default=False)
     can_view_all: Mapped[bool] = mapped_column(default=True)
     is_active: Mapped[bool] = mapped_column(default=True)
