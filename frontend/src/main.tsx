@@ -448,6 +448,7 @@ function App() {
   const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
   const [users, setUsers] = React.useState<User[]>([]);
   const [userForm, setUserForm] = React.useState({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole });
+  const [userFormOpen, setUserFormOpen] = React.useState(false);
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [summary, setSummary] = React.useState<SummaryCandidate[]>([]);
@@ -648,6 +649,7 @@ function App() {
     try {
       await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
       setUserForm({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" });
+      setUserFormOpen(false);
       setUsers(await api<User[]>("/users"));
       setNotice("Usuario creado");
     } catch (error) {
@@ -1202,6 +1204,16 @@ function App() {
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <Users size={17} /> Usuarios
                   </h3>
+                  <div className="flex justify-end">
+                    <button
+                      className={`${buttonClass} bg-[#486366]`}
+                      type="button"
+                      onClick={() => setUserFormOpen((current) => !current)}
+                    >
+                      {userFormOpen ? <X size={18} /> : <Plus size={18} />}
+                      {userFormOpen ? "Ocultar formulario" : "Crear usuario"}
+                    </button>
+                  </div>
                   <div className="grid gap-2">
                     {users.map((row) => (
                       <div className="grid grid-cols-[minmax(0,1fr)_28px] items-center gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
@@ -1223,7 +1235,8 @@ function App() {
                       </div>
                     ))}
                   </div>
-                  <div className="grid gap-2 md:grid-cols-2">
+                  {userFormOpen ? (
+                  <div className="grid gap-2 rounded-md border border-[#d9e8e6] bg-[#f8fbfa] p-3 md:grid-cols-2">
                     <input
                       className={inputClass}
                       name="valcv-new-user-login"
@@ -1258,10 +1271,15 @@ function App() {
                       ))}
                     </select>
                   </div>
+                  ) : null}
+                  {userFormOpen ? (
+                  <>
                   <small className={mutedTextClass}>{ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}</small>
                   <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
                     <Plus size={18} /> Crear usuario
                   </button>
+                  </>
+                  ) : null}
                 </section>
               ) : null}
 
