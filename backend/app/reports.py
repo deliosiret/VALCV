@@ -65,7 +65,7 @@ def configure(document: Document) -> None:
     section.right_margin = Cm(2.0)
     styles = document.styles
     styles["Normal"].font.name = "Aptos"
-    styles["Normal"].font.size = Pt(10.5)
+    styles["Normal"].font.size = Pt(11)
     for name in ("Title", "Heading 1", "Heading 2"):
         styles[name].font.name = "Aptos Display"
     footer = section.footer.paragraphs[0]
@@ -90,7 +90,7 @@ def body(document: Document, text: str):
     paragraph.paragraph_format.line_spacing = 1.08
     run = paragraph.add_run(text)
     run.font.name = "Aptos"
-    run.font.size = Pt(10.5)
+    run.font.size = Pt(11)
     return paragraph
 
 
@@ -99,7 +99,7 @@ def bullet(document: Document, text: str):
     paragraph.paragraph_format.space_after = Pt(3)
     run = paragraph.add_run(text)
     run.font.name = "Aptos"
-    run.font.size = Pt(10.5)
+    run.font.size = Pt(11)
     return paragraph
 
 
@@ -206,9 +206,9 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
             continue
         for criterion in children:
             if criterion.is_critical:
-                body(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
+                bullet(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
             else:
-                body(document, f"{criterion.aspect}. Peso relativo dentro de la categoría: {percent(criterion.within_category_weight)}.")
+                bullet(document, f"{criterion.aspect}. Peso relativo dentro de la categoría: {percent(criterion.within_category_weight)}.")
 
 
 def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
