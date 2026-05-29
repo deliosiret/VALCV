@@ -1208,10 +1208,9 @@ function App() {
                     <button
                       className={`${buttonClass} bg-[#486366]`}
                       type="button"
-                      onClick={() => setUserFormOpen((current) => !current)}
+                      onClick={() => setUserFormOpen(true)}
                     >
-                      {userFormOpen ? <X size={18} /> : <Plus size={18} />}
-                      {userFormOpen ? "Ocultar formulario" : "Crear usuario"}
+                      <Plus size={18} /> Crear usuario
                     </button>
                   </div>
                   <div className="grid gap-2">
@@ -1235,51 +1234,6 @@ function App() {
                       </div>
                     ))}
                   </div>
-                  {userFormOpen ? (
-                  <div className="grid gap-2 rounded-md border border-[#d9e8e6] bg-[#f8fbfa] p-3 md:grid-cols-2">
-                    <input
-                      className={inputClass}
-                      name="valcv-new-user-login"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                      placeholder="Usuario"
-                      value={userForm.username}
-                      onChange={(event) => setUserForm({ ...userForm, username: event.target.value })}
-                    />
-                    <input
-                      className={inputClass}
-                      type="password"
-                      name="valcv-new-user-secret"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                      placeholder="Contraseña"
-                      value={userForm.password}
-                      onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
-                    />
-                    <input className={inputClass} placeholder="Nombre" value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} />
-                    <input className={inputClass} placeholder="Apellido" value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} />
-                    <input className={inputClass} placeholder="Cargo" value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} />
-                    <input className={inputClass} placeholder="Área" value={userForm.area} onChange={(event) => setUserForm({ ...userForm, area: event.target.value })} />
-                    <input className={inputClass} placeholder="Código de empleado" value={userForm.employee_code} onChange={(event) => setUserForm({ ...userForm, employee_code: event.target.value })} />
-                    <select className={inputClass} value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })}>
-                      {ROLE_OPTIONS.map((role) => (
-                        <option key={role.value} value={role.value}>{role.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  ) : null}
-                  {userFormOpen ? (
-                  <>
-                  <small className={mutedTextClass}>{ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}</small>
-                  <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
-                    <Plus size={18} /> Crear usuario
-                  </button>
-                  </>
-                  ) : null}
                 </section>
               ) : null}
 
@@ -1293,6 +1247,69 @@ function App() {
               </div>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {userFormOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-3">
+          <div className="grid max-h-[92vh] w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-line bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
+              <div>
+                <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+                  <UserRoundPlus size={18} /> Crear usuario
+                </h2>
+                <p className="text-sm text-muted">Define identidad institucional, credenciales y rol de acceso.</p>
+              </div>
+              <button className={`${buttonClass} bg-[#486366] px-2`} type="button" onClick={() => setUserFormOpen(false)} title="Cerrar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              <input
+                className={inputClass}
+                name="valcv-new-user-login"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Usuario"
+                value={userForm.username}
+                onChange={(event) => setUserForm({ ...userForm, username: event.target.value })}
+              />
+              <input
+                className={inputClass}
+                type="password"
+                name="valcv-new-user-secret"
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Contraseña"
+                value={userForm.password}
+                onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+              />
+              <input className={inputClass} placeholder="Nombre" value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} />
+              <input className={inputClass} placeholder="Apellido" value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} />
+              <input className={inputClass} placeholder="Cargo" value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} />
+              <input className={inputClass} placeholder="Área" value={userForm.area} onChange={(event) => setUserForm({ ...userForm, area: event.target.value })} />
+              <input className={inputClass} placeholder="Código de empleado" value={userForm.employee_code} onChange={(event) => setUserForm({ ...userForm, employee_code: event.target.value })} />
+              <select className={inputClass} value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })}>
+                {ROLE_OPTIONS.map((role) => (
+                  <option key={role.value} value={role.value}>{role.label}</option>
+                ))}
+              </select>
+            </div>
+            <small className={mutedTextClass}>{ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}</small>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setUserFormOpen(false)}>
+                Cancelar
+              </button>
+              <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
+                <Plus size={18} /> Crear usuario
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
