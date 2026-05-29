@@ -443,7 +443,8 @@ function App() {
   const [busy, setBusy] = React.useState(false);
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
-  const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId) ?? candidates[0];
+  const filteredCandidates = selectedTemplate ? candidates.filter((candidate) => candidate.template_id === selectedTemplate.id) : [];
+  const selectedCandidate = filteredCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? filteredCandidates[0];
   const selectedScores = scoreMap(selectedCandidate);
   const selectedScoreSignature = selectedCandidate?.scores.map((score) => `${score.criterion_id}:${score.score}:${score.updated_at}:${score.evaluator_note}:${score.file_ids.join(",")}`).join("|") ?? "";
   const categories = Array.from(new Set(selectedTemplate?.criteria.map((criterion) => criterion.category) ?? []));
@@ -453,22 +454,29 @@ function App() {
     criteria: selectedTemplate?.criteria.filter((criterion) => criterion.category === category) ?? [],
   }));
 
+  async function loadSummary(templateId: number | null) {
+    if (!templateId) {
+      setSummary([]);
+      return;
+    }
+    const summaryRows = await api<{ candidates: SummaryCandidate[] }>(`/summary?template_id=${templateId}`);
+    setSummary(summaryRows.candidates);
+  }
+
   async function load() {
-    const [templateRows, candidateRows, summaryRows, settingsRows, modelRows] = await Promise.all([
+    const [templateRows, candidateRows, settingsRows, modelRows] = await Promise.all([
       api<Template[]>("/templates"),
       api<Candidate[]>("/candidates"),
-      api<{ candidates: SummaryCandidate[] }>("/summary"),
       api<AISettings>("/settings/ai"),
       api<string[]>("/settings/ai/models"),
     ]);
     setTemplates(templateRows);
     setCandidates(candidateRows);
-    setSummary(summaryRows.candidates);
     setAiSettings(settingsRows);
     setAiModels(modelRows);
     setSettingsForm((current) => ({ ...current, gemini_model: settingsRows.gemini_model }));
-    setSelectedTemplateId((current) => current ?? templateRows[0]?.id ?? null);
-    setSelectedCandidateId((current) => current ?? candidateRows[0]?.id ?? null);
+    setSelectedTemplateId((current) => templateRows.some((template) => template.id === current) ? current : templateRows[0]?.id ?? null);
+    setSelectedCandidateId((current) => candidateRows.some((candidate) => candidate.id === current) ? current : candidateRows[0]?.id ?? null);
   }
 
   React.useEffect(() => {
@@ -485,6 +493,17 @@ function App() {
         setNotice(error.message);
       });
   }, [token]);
+
+  React.useEffect(() => {
+    if (!token) return;
+    const templateId = selectedTemplate?.id ?? null;
+    setSummary([]);
+    loadSummary(templateId).catch((error) => setNotice(error.message));
+    setSelectedCandidateId((current) => {
+      if (current && filteredCandidates.some((candidate) => candidate.id === current)) return current;
+      return filteredCandidates[0]?.id ?? null;
+    });
+  }, [token, selectedTemplate?.id, candidates]);
 
   React.useEffect(() => {
     if (settingsOpen && user?.is_admin) {
@@ -971,18 +990,19 @@ function App() {
     }
   }
 
+  const summaryForCharts = [...summary].sort((left, right) => right.global_score - left.global_score);
   const radarData = categories.map((category) => ({
     category: category.replace("Competencias ", "").replace("Formación académica y requisitos básicos", "Formación"),
-    ...(summary.reduce((acc, candidate) => ({ ...acc, [candidate.name]: Math.round((candidate.categories[category] ?? 0) * 100) }), {})),
+    ...(summaryForCharts.reduce((acc, candidate) => ({ ...acc, [candidate.name]: Math.round((candidate.categories[category] ?? 0) * 100) }), {})),
   }));
 
-  const rankingData = summary
+  const rankingData = summaryForCharts
     .map((candidate, index) => ({
+      id: candidate.id,
       name: candidate.name,
       score: Math.round(candidate.global_score * 100),
       fill: candidateColor(index),
-    }))
-    .sort((left, right) => right.score - left.score);
+    }));
 
   if (!token || !user) {
     return (
@@ -1041,7 +1061,7 @@ function App() {
         <span>
           {busy
             ? "Procesando..."
-            : `${templates.length} plantilla(s), ${candidates.length} candidato(s), IA ${aiSettings?.gemini_api_key_configured ? aiSettings.gemini_model : "sin configurar"}`}
+            : `${templates.length} plantilla(s), ${filteredCandidates.length} candidato(s) en plantilla, IA ${aiSettings?.gemini_api_key_configured ? aiSettings.gemini_model : "sin configurar"}`}
         </span>
       </section>
 
@@ -1438,7 +1458,7 @@ function App() {
 
           <div className={`${panelClass} grid gap-2.5`}>
             <h2 className={headingClass}><Gauge size={18} /> Candidatos</h2>
-            {candidates.map((candidate) => (
+            {filteredCandidates.map((candidate) => (
               <div
                 className={`grid grid-cols-[minmax(0,1fr)_36px] items-stretch gap-1 rounded-md border p-1 ${
                   candidate.id === selectedCandidate?.id ? "border-brand bg-brand" : "border-line bg-[#f8fbfa]"
@@ -1492,7 +1512,7 @@ function App() {
                   <PolarGrid />
                   <PolarAngleAxis dataKey="category" tick={{ fontSize: 11 }} />
                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
-                  {summary.slice(0, 5).map((candidate, index) => (
+                  {summaryForCharts.slice(0, 5).map((candidate, index) => (
                     <Radar key={candidate.id} dataKey={candidate.name} stroke={candidateColor(index)} fill={candidateColor(index)} fillOpacity={0.14} />
                   ))}
                   <Legend />
