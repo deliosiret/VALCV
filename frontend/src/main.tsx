@@ -455,6 +455,8 @@ function App() {
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = React.useState<number | null>(null);
   const [candidateForm, setCandidateForm] = React.useState({ name: "", document_id: "", comments: "" });
+  const [candidateComments, setCandidateComments] = React.useState("");
+  const [candidateCommentsDirty, setCandidateCommentsDirty] = React.useState(false);
   const [draftScores, setDraftScores] = React.useState<Record<number, number>>({});
   const [draftRationales, setDraftRationales] = React.useState<Record<number, string>>({});
   const [draftEvaluatorNotes, setDraftEvaluatorNotes] = React.useState<Record<number, string>>({});
@@ -556,11 +558,15 @@ function App() {
 
   React.useEffect(() => {
     if (selectedCandidate) {
+      setCandidateComments(selectedCandidate.comments ?? "");
+      setCandidateCommentsDirty(false);
       setDraftScores(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.score])));
       setDraftRationales(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.rationale])));
       setDraftEvaluatorNotes(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.evaluator_note])));
       setDraftFileIds(Object.fromEntries(selectedCandidate.scores.map((score) => [score.criterion_id, score.file_ids])));
     } else {
+      setCandidateComments("");
+      setCandidateCommentsDirty(false);
       setDraftScores({});
       setDraftRationales({});
       setDraftEvaluatorNotes({});
@@ -569,6 +575,27 @@ function App() {
     setEvaluationDirty(false);
     setAutosaveState("idle");
   }, [selectedCandidate?.id, selectedScoreSignature]);
+
+  React.useEffect(() => {
+    if (!candidateCommentsDirty || !selectedCandidate || !canEvaluateCandidates) return;
+    setAutosaveState("saving");
+    const timeout = window.setTimeout(async () => {
+      try {
+        await api<Candidate>(`/candidates/${selectedCandidate.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ comments: candidateComments }),
+        });
+        setCandidateCommentsDirty(false);
+        setAutosaveState("saved");
+        setNotice("Observaciones generales guardadas");
+        await load();
+      } catch (error) {
+        setAutosaveState("error");
+        setNotice(error instanceof Error ? error.message : "No se pudieron guardar las observaciones");
+      }
+    }, 700);
+    return () => window.clearTimeout(timeout);
+  }, [candidateCommentsDirty, candidateComments, selectedCandidate?.id, canEvaluateCandidates]);
 
   React.useEffect(() => {
     if (!evaluationDirty || !selectedCandidate || !selectedTemplate) return;
@@ -1717,6 +1744,20 @@ function App() {
                     </span>
                   ))}
                 </div>
+                <label className="mb-3 grid gap-1.5 rounded-md border border-[#e5eeee] bg-[#fbfdfc] p-3 text-sm font-semibold text-[#25464a]">
+                  Comentarios y observaciones generales sobre el candidato
+                  <textarea
+                    className={`${inputClass} min-h-24 resize-y bg-white text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2]`}
+                    placeholder="Anota aquí observaciones generales del expediente, puntos a revisar, impresión global o comentarios para Recursos Humanos."
+                    value={candidateComments}
+                    disabled={!canEvaluateCandidates}
+                    onChange={(event) => {
+                      setCandidateComments(event.target.value);
+                      setCandidateCommentsDirty(true);
+                      setAutosaveState("saving");
+                    }}
+                  />
+                </label>
                 <div className="grid gap-4">
                   {criteriaGroups.map((group, groupIndex) => (
                     <section className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={group.category}>
