@@ -173,7 +173,7 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
         body(document, f"Descripción del perfil: {template.description}")
 
     rows = [[category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))] for category in template.categories]
-    add_table(document, ["Categoría", "Peso definido", "Resultado del candidato"], rows)
+    add_table(document, ["Categoría", "Participación en el resultado final", "Resultado del candidato"], rows)
 
 
 def candidate_documents_narrative(document: Document, candidate: Candidate) -> None:
@@ -193,8 +193,8 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
     heading(document, "Estructura de evaluación")
     body(
         document,
-        "La evaluación se organizó en categorías con distintos niveles de importancia dentro del resultado final. "
-        "A continuación se presenta la estructura aplicada para valorar el perfil del candidato.",
+        "La evaluación se organizó en categorías con distintos niveles de incidencia en el resultado final. "
+        "Dentro de cada categoría se distribuye la valoración entre sus criterios correspondientes.",
     )
     grouped: dict[str, list[Criterion]] = defaultdict(list)
     for criterion in criteria:
@@ -209,7 +209,7 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
             if criterion.is_critical:
                 bullet(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
             else:
-                bullet(document, f"{criterion.aspect}. Peso relativo dentro de la categoría: {percent(criterion.within_category_weight)}.")
+                bullet(document, f"{criterion.aspect}. Distribución interna de la categoría: {percent(criterion.within_category_weight)}.")
 
 
 def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:

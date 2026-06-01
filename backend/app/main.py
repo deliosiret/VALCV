@@ -221,6 +221,24 @@ def normalized_template_parts(payload: TemplateCreate) -> tuple[list[dict], list
     return categories, criteria
 
 
+def validate_template_structure(categories: list[dict], criteria: list[dict]) -> None:
+    if len(categories) < MIN_TEMPLATE_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La plantilla debe tener al menos {MIN_TEMPLATE_CATEGORIES} categorías.",
+        )
+    criteria_by_category: dict[str, int] = {category["name"]: 0 for category in categories}
+    for criterion in criteria:
+        if criterion["category"] in criteria_by_category and criterion["aspect"]:
+            criteria_by_category[criterion["category"]] += 1
+    missing = [name for name, count in criteria_by_category.items() if count < MIN_CRITERIA_PER_CATEGORY]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Cada categoría debe tener al menos un criterio. Revisa: " + ", ".join(missing),
+        )
+
+
 def criterion_requires_score_reset(criterion: Criterion, row: dict) -> bool:
     comparable_fields = (
         "category",
@@ -347,6 +365,8 @@ AI_MODEL_OPTIONS = [
     "gemini-2.5-flash",
     "gemini-2.5-pro",
 ]
+MIN_TEMPLATE_CATEGORIES = 3
+MIN_CRITERIA_PER_CATEGORY = 1
 
 
 @app.on_event("startup")
@@ -375,6 +395,9 @@ def ensure_schema():
     if "ai_evaluation_locked" not in template_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE templates ADD COLUMN ai_evaluation_locked BOOLEAN NOT NULL DEFAULT TRUE"))
+    if "is_archived" not in template_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE templates ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
     criterion_columns = {column["name"] for column in inspector.get_columns("criteria")}
     if "is_critical" not in criterion_columns:
         with engine.begin() as connection:
@@ -585,15 +608,22 @@ def list_ai_models(_: User = Depends(get_current_user)):
 
 @app.get("/templates", response_model=list[TemplateOut])
 def list_templates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(Template).options(selectinload(Template.criteria), selectinload(Template.categories)).order_by(Template.id).all()
+    return (
+        db.query(Template)
+        .options(selectinload(Template.criteria), selectinload(Template.categories))
+        .filter(Template.is_archived.is_(False))
+        .order_by(Template.id)
+        .all()
+    )
 
 
 @app.post("/templates", response_model=TemplateOut)
 def create_template(payload: TemplateCreate, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
+    categories, criteria = normalized_template_parts(payload)
+    validate_template_structure(categories, criteria)
     template = Template(name=payload.name, description=payload.description, ai_evaluation_locked=payload.ai_evaluation_locked)
     db.add(template)
     db.flush()
-    categories, criteria = normalized_template_parts(payload)
     for category in categories:
         db.add(TemplateCategory(template_id=template.id, **category))
     for criterion in criteria:
@@ -630,12 +660,13 @@ async def generate_template_ai(
 @app.put("/templates/{template_id}", response_model=TemplateOut)
 def replace_template(template_id: int, payload: TemplateCreate, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
     template = get_template_or_404(db, template_id)
+    categories, criteria = normalized_template_parts(payload)
+    validate_template_structure(categories, criteria)
     template.name = payload.name
     template.description = payload.description
     template.ai_evaluation_locked = payload.ai_evaluation_locked
     template.categories.clear()
     db.flush()
-    categories, criteria = normalized_template_parts(payload)
     for category in categories:
         template.categories.append(TemplateCategory(**category))
     existing_criteria = {criterion.id: criterion for criterion in template.criteria}
@@ -658,6 +689,18 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
             db.delete(criterion)
     db.commit()
     return get_template_or_404(db, template_id)
+
+
+@app.delete("/templates/{template_id}")
+def delete_template(template_id: int, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
+    template = get_template_or_404(db, template_id)
+    if template.candidates:
+        template.is_archived = True
+        db.commit()
+        return {"status": "archived", "message": "La plantilla tiene candidatos asociados y fue archivada."}
+    db.delete(template)
+    db.commit()
+    return {"status": "deleted", "message": "Plantilla eliminada."}
 
 
 @app.patch("/criteria/{criterion_id}", response_model=TemplateOut)
@@ -694,7 +737,9 @@ def list_candidates(_: User = Depends(require_permission("view_results")), db: S
 
 @app.post("/candidates", response_model=CandidateOut)
 def create_candidate(payload: CandidateCreate, user: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
-    get_template_or_404(db, payload.template_id)
+    template = get_template_or_404(db, payload.template_id)
+    if template.is_archived:
+        raise HTTPException(status_code=400, detail="No se pueden crear candidatos en un perfil archivado.")
     candidate = Candidate(**payload.model_dump(), evaluator=user_display_name(user), evaluator_user_id=user.id)
     db.add(candidate)
     db.commit()

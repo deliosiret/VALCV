@@ -53,6 +53,7 @@ class TemplateOut(BaseModel):
     name: str
     description: str
     ai_evaluation_locked: bool = True
+    is_archived: bool = False
     created_at: datetime
     categories: list[CategoryOut] = Field(default_factory=list)
     criteria: list[CriterionOut]

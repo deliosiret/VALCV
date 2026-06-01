@@ -27,6 +27,7 @@ class Template(Base):
     name: Mapped[str] = mapped_column(String(180), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
     ai_evaluation_locked: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     criteria: Mapped[list["Criterion"]] = relationship(

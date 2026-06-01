@@ -123,6 +123,7 @@ type Template = {
   name: string;
   description: string;
   ai_evaluation_locked: boolean;
+  is_archived: boolean;
   categories: TemplateCategory[];
   criteria: Criterion[];
 };
@@ -144,6 +145,9 @@ type TemplateDraft = {
   categories: TemplateCategory[];
   criteria: CriterionDraft[];
 };
+
+const MIN_TEMPLATE_CATEGORIES = 3;
+const MIN_CRITERIA_PER_CATEGORY = 1;
 
 type Score = {
   id: number;
@@ -306,6 +310,21 @@ function templateWeightIssues(draft: TemplateDraft) {
     if (!childCriteria.length) return;
     const childTotal = childCriteria.reduce((total, criterion) => total + (Number(criterion.within_category_weight) || 0), 0);
     if (!percentStatus(childTotal).ok) issues.push(`los criterios de "${category.name || "Sin nombre"}" no suman 100%`);
+  });
+  return issues;
+}
+
+function templateStructureIssues(draft: TemplateDraft) {
+  const issues: string[] = [];
+  const namedCategories = draft.categories.filter((category) => category.name.trim());
+  if (namedCategories.length < MIN_TEMPLATE_CATEGORIES) {
+    issues.push(`debe tener al menos ${MIN_TEMPLATE_CATEGORIES} categorías`);
+  }
+  namedCategories.forEach((category) => {
+    const childCriteria = draft.criteria.filter((criterion) => criterion.category.trim() === category.name.trim() && criterion.aspect.trim());
+    if (childCriteria.length < MIN_CRITERIA_PER_CATEGORY) {
+      issues.push(`"${category.name.trim()}" debe tener al menos un criterio`);
+    }
   });
   return issues;
 }
@@ -1041,6 +1060,11 @@ function App() {
   async function saveTemplate(event: React.FormEvent) {
     event.preventDefault();
     let draftToSave = templateDraft;
+    const structureIssues = templateStructureIssues(draftToSave);
+    if (structureIssues.length) {
+      setNotice(`Completa la estructura mínima: ${structureIssues.join(", ")}.`);
+      return;
+    }
     let weightIssues = templateWeightIssues(draftToSave);
     if (weightIssues.length) {
       const shouldNormalize = window.confirm(
@@ -1099,6 +1123,26 @@ function App() {
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo guardar la plantilla");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteTemplate() {
+    if (!selectedTemplate) return;
+    const confirmed = window.confirm(
+      `¿Quieres eliminar "${selectedTemplate.name}"? Si ya tiene candidatos asociados, se archivará para conservar el historial.`
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const result = await api<{ status: string; message: string }>(`/templates/${selectedTemplate.id}`, { method: "DELETE" });
+      setSelectedTemplateId(null);
+      setTemplateEditorOpen(false);
+      setNotice(result.message);
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo eliminar la plantilla");
     } finally {
       setBusy(false);
     }
@@ -1450,6 +1494,11 @@ function App() {
                     <Copy size={18} /> Duplicar
                   </button>
                 ) : null}
+                {templateDraft.id ? (
+                  <button className={`${buttonClass} bg-[#9a3412]`} type="button" onClick={deleteTemplate} disabled={busy} title="Eliminar o archivar plantilla">
+                    <Trash2 size={18} /> Eliminar
+                  </button>
+                ) : null}
                 <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setTemplateEditorOpen(false)} title="Cerrar">
                   <X size={18} />
                 </button>
@@ -1525,7 +1574,7 @@ function App() {
                           <input className={inputClass} placeholder="Nombre de categoría" value={category.name} onChange={(event) => updateTemplateCategory(categoryIndex, { name: event.target.value })} />
                         </label>
                         <label className="relative">
-                          <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-normal text-brand">Peso</span>
+                          <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-normal text-brand">Peso de categoría</span>
                           <input
                             className={`${inputClass} pr-7`}
                             type="number"
@@ -1573,7 +1622,7 @@ function App() {
                                     step="1"
                                     min="0"
                                     max="100"
-                                    placeholder="Peso"
+                                    placeholder="Peso del criterio"
                                     value={toPercentInput(criterion.within_category_weight)}
                                     onWheel={ignoreNumberWheel}
                                     onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
