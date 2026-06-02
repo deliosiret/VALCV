@@ -1852,7 +1852,7 @@ function App() {
                       </span>
                     </div>
                     <p className="leading-relaxed text-muted">
-                      Segundo turno de IA: {selectedCandidate.ai_bonus_rationale}
+                      {selectedCandidate.ai_bonus_rationale}
                     </p>
                   </section>
                 ) : null}
