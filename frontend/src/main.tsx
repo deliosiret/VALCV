@@ -218,11 +218,37 @@ function recommendationClass(value?: string) {
   return "bg-[#f4e8de] text-[#9a3412]";
 }
 
-function recommendationScaleTitle(template?: Template | TemplateDraft | null) {
+function recommendationScaleRows(template?: Template | TemplateDraft | null) {
   const review = template?.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold;
   const recommended = template?.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold;
   const highly = template?.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold;
-  return `Escala de evaluación: Altamente recomendable desde ${toPercentInput(highly)}%; Recomendable desde ${toPercentInput(recommended)}%; Requiere revisión desde ${toPercentInput(review)}%; No recomendable por debajo de ${toPercentInput(review)}%.`;
+  return [
+    ["Altamente recomendable", `desde ${toPercentInput(highly)}%`],
+    ["Recomendable", `desde ${toPercentInput(recommended)}%`],
+    ["Requiere revisión", `desde ${toPercentInput(review)}%`],
+    ["No recomendable", `menor a ${toPercentInput(review)}%`],
+  ];
+}
+
+function ScaleTooltip({ template, children }: { template?: Template | TemplateDraft | null; children: React.ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      <span tabIndex={0} className="inline-flex outline-none focus-visible:ring-2 focus-visible:ring-brand/30">
+        {children}
+      </span>
+      <span className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-72 rounded-lg border border-[#cfe0df] bg-white p-3 text-left text-xs font-medium text-[#25464a] shadow-xl group-hover:block group-focus-within:block">
+        <span className="mb-2 block text-sm font-bold text-ink">Escala de evaluación</span>
+        <span className="grid gap-1.5">
+          {recommendationScaleRows(template).map(([label, value]) => (
+            <span className="flex items-center justify-between gap-3" key={label}>
+              <span>{label}</span>
+              <span className="font-bold text-brand">{value}</span>
+            </span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
 }
 
 type AISettings = {
@@ -2159,12 +2185,11 @@ function App() {
                         <span className="rounded-md bg-[#e6f1ef] px-3 py-2 text-sm font-bold text-brand">
                           Score global: {selectedSummary ? `${toPercentInput(selectedSummary.global_score)}%` : "Sin calcular"}
                         </span>
-                        <span
-                          className={`rounded-md px-3 py-2 text-sm font-bold ${recommendationClass(selectedSummary?.recommendation)}`}
-                          title={recommendationScaleTitle(selectedTemplate)}
-                        >
-                          {selectedSummary?.recommendation ?? "Sin recomendación"}
-                        </span>
+                        <ScaleTooltip template={selectedTemplate}>
+                          <span className={`rounded-md px-3 py-2 text-sm font-bold ${recommendationClass(selectedSummary?.recommendation)}`}>
+                            {selectedSummary?.recommendation ?? "Sin recomendación"}
+                          </span>
+                        </ScaleTooltip>
                       </div>
                     </div>
 
