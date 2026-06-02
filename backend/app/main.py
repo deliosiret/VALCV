@@ -912,14 +912,16 @@ def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluat
 @app.post("/candidates/{candidate_id}/criteria/{criterion_id}/evaluate-ai", response_model=CandidateOut)
 def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
+    template = get_template_or_404(db, candidate.template_id)
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
     if not criterion or criterion.template_id != candidate.template_id:
         raise HTTPException(status_code=400, detail="Criterio inválido para este candidato.")
     if criterion.evaluation_mode != EvaluationMode.automatic:
         raise HTTPException(status_code=400, detail="Este criterio no está configurado para evaluación con IA.")
+    automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
     try:
         api_key, model = get_ai_config(db)
-        results = evaluate_candidate_with_gemini(candidate, [criterion], settings.upload_dir, api_key, model)
+        results = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
