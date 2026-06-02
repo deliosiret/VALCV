@@ -44,6 +44,9 @@ class TemplateCreate(BaseModel):
     name: str
     description: str = ""
     ai_evaluation_locked: bool = True
+    highly_recommended_threshold: float = Field(default=0.85, ge=0, le=1)
+    recommended_threshold: float = Field(default=0.7, ge=0, le=1)
+    review_threshold: float = Field(default=0.55, ge=0, le=1)
     categories: list[CategoryIn] = Field(default_factory=list)
     criteria: list[CriterionIn] = Field(default_factory=list)
 
@@ -54,6 +57,9 @@ class TemplateOut(BaseModel):
     description: str
     ai_evaluation_locked: bool = True
     is_archived: bool = False
+    highly_recommended_threshold: float = 0.85
+    recommended_threshold: float = 0.7
+    review_threshold: float = 0.55
     created_at: datetime
     categories: list[CategoryOut] = Field(default_factory=list)
     criteria: list[CriterionOut]

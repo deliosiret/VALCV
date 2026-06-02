@@ -259,6 +259,14 @@ def validate_template_structure(categories: list[dict], criteria: list[dict]) ->
         )
 
 
+def validate_recommendation_scale(payload: TemplateCreate) -> None:
+    if not (payload.review_threshold <= payload.recommended_threshold <= payload.highly_recommended_threshold):
+        raise HTTPException(
+            status_code=400,
+            detail="La escala debe cumplir: Requiere revisión <= Recomendable <= Altamente recomendable.",
+        )
+
+
 def criterion_requires_score_reset(criterion: Criterion, row: dict) -> bool:
     comparable_fields = (
         "category",
@@ -421,6 +429,15 @@ def ensure_schema():
     if "is_archived" not in template_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE templates ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
+    template_thresholds = {
+        "highly_recommended_threshold": "DOUBLE PRECISION NOT NULL DEFAULT 0.85",
+        "recommended_threshold": "DOUBLE PRECISION NOT NULL DEFAULT 0.7",
+        "review_threshold": "DOUBLE PRECISION NOT NULL DEFAULT 0.55",
+    }
+    for column_name, definition in template_thresholds.items():
+        if column_name not in template_columns:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE templates ADD COLUMN {column_name} {definition}"))
     criterion_columns = {column["name"] for column in inspector.get_columns("criteria")}
     if "is_critical" not in criterion_columns:
         with engine.begin() as connection:
@@ -653,7 +670,15 @@ def list_templates(_: User = Depends(get_current_user), db: Session = Depends(ge
 def create_template(payload: TemplateCreate, _: User = Depends(require_permission("manage_templates")), db: Session = Depends(get_db)):
     categories, criteria = normalized_template_parts(payload)
     validate_template_structure(categories, criteria)
-    template = Template(name=payload.name, description=payload.description, ai_evaluation_locked=payload.ai_evaluation_locked)
+    validate_recommendation_scale(payload)
+    template = Template(
+        name=payload.name,
+        description=payload.description,
+        ai_evaluation_locked=payload.ai_evaluation_locked,
+        highly_recommended_threshold=payload.highly_recommended_threshold,
+        recommended_threshold=payload.recommended_threshold,
+        review_threshold=payload.review_threshold,
+    )
     db.add(template)
     db.flush()
     for category in categories:
@@ -694,9 +719,13 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
     template = get_template_or_404(db, template_id)
     categories, criteria = normalized_template_parts(payload)
     validate_template_structure(categories, criteria)
+    validate_recommendation_scale(payload)
     template.name = payload.name
     template.description = payload.description
     template.ai_evaluation_locked = payload.ai_evaluation_locked
+    template.highly_recommended_threshold = payload.highly_recommended_threshold
+    template.recommended_threshold = payload.recommended_threshold
+    template.review_threshold = payload.review_threshold
     template.categories.clear()
     db.flush()
     for category in categories:
@@ -1004,8 +1033,10 @@ def summary(template_id: int | None = None, user: User = Depends(require_permiss
         return {"candidates": [], "categories": []}
 
     criteria_by_template: dict[int, list[Criterion]] = {}
+    templates_by_id: dict[int, Template | None] = {}
     for candidate in candidates:
         if candidate.template_id not in criteria_by_template:
+            templates_by_id[candidate.template_id] = db.query(Template).filter(Template.id == candidate.template_id).first()
             criteria_by_template[candidate.template_id] = (
                 db.query(Criterion)
                 .filter(Criterion.template_id == candidate.template_id)
@@ -1013,6 +1044,9 @@ def summary(template_id: int | None = None, user: User = Depends(require_permiss
                 .all()
             )
 
-    rows = [summarize_candidate(candidate, criteria_by_template[candidate.template_id]) for candidate in candidates]
+    rows = [
+        summarize_candidate(candidate, criteria_by_template[candidate.template_id], templates_by_id.get(candidate.template_id))
+        for candidate in candidates
+    ]
     categories = sorted({category for row in rows for category in row["categories"]})
     return {"candidates": rows, "categories": categories}

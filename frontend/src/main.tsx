@@ -55,6 +55,11 @@ const headingClass = "mb-3.5 flex items-center gap-2 text-base font-semibold tra
 const mutedTextClass = "block text-xs leading-snug text-muted";
 const aiLockedTitle = "Este criterio fue evaluado por IA y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
 const AI_EVALUATOR_NOTE_PLACEHOLDER = "Nota complementaria del evaluador: úsala si el juicio de la IA quedó incompleto o requiere contexto experto adicional.";
+const DEFAULT_RECOMMENDATION_SCALE = {
+  highly_recommended_threshold: 0.85,
+  recommended_threshold: 0.7,
+  review_threshold: 0.55,
+};
 
 function candidateColor(index: number) {
   return COLORS[index % COLORS.length];
@@ -125,6 +130,9 @@ type Template = {
   description: string;
   ai_evaluation_locked: boolean;
   is_archived: boolean;
+  highly_recommended_threshold: number;
+  recommended_threshold: number;
+  review_threshold: number;
   categories: TemplateCategory[];
   criteria: Criterion[];
 };
@@ -143,6 +151,9 @@ type TemplateDraft = {
   name: string;
   description: string;
   ai_evaluation_locked: boolean;
+  highly_recommended_threshold: number;
+  recommended_threshold: number;
+  review_threshold: number;
   categories: TemplateCategory[];
   criteria: CriterionDraft[];
 };
@@ -182,6 +193,11 @@ type SummaryCandidate = {
   document_id: string;
   global_score: number;
   recommendation: string;
+  recommendation_scale?: {
+    highly_recommended: number;
+    recommended: number;
+    review: number;
+  };
   categories: Record<string, number>;
 };
 
@@ -200,6 +216,13 @@ function recommendationClass(value?: string) {
     return "bg-[#e6f1ef] text-brand";
   }
   return "bg-[#f4e8de] text-[#9a3412]";
+}
+
+function recommendationScaleTitle(template?: Template | TemplateDraft | null) {
+  const review = template?.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold;
+  const recommended = template?.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold;
+  const highly = template?.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold;
+  return `Escala de evaluación: Altamente recomendable desde ${toPercentInput(highly)}%; Recomendable desde ${toPercentInput(recommended)}%; Requiere revisión desde ${toPercentInput(review)}%; No recomendable por debajo de ${toPercentInput(review)}%.`;
 }
 
 type AISettings = {
@@ -276,6 +299,17 @@ function blankCategory(orderIndex = 0): TemplateCategory {
   return { name: "", weight: 0, order_index: orderIndex };
 }
 
+function blankTemplateDraft(): TemplateDraft {
+  return {
+    name: "",
+    description: "",
+    ai_evaluation_locked: true,
+    ...DEFAULT_RECOMMENDATION_SCALE,
+    categories: [blankCategory()],
+    criteria: [],
+  };
+}
+
 function categoriesFromTemplate(template: Template): TemplateCategory[] {
   if (template.categories?.length) {
     return template.categories.map((category, index) => ({ ...category, order_index: index }));
@@ -293,6 +327,9 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
     name: duplicate ? `Copia de ${template.name}` : template.name,
     description: template.description,
     ai_evaluation_locked: template.ai_evaluation_locked ?? true,
+    highly_recommended_threshold: template.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold,
+    recommended_threshold: template.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold,
+    review_threshold: template.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold,
     categories: categoriesFromTemplate(template),
     criteria: template.criteria.map((criterion, index) => ({
       ...criterion,
@@ -333,6 +370,19 @@ function templateWeightIssues(draft: TemplateDraft) {
     if (!percentStatus(childTotal).ok) issues.push(`los criterios de "${category.name || "Sin nombre"}" no suman 100%`);
   });
   return issues;
+}
+
+function templateScaleIssues(draft: TemplateDraft) {
+  const review = Number(draft.review_threshold) || 0;
+  const recommended = Number(draft.recommended_threshold) || 0;
+  const highly = Number(draft.highly_recommended_threshold) || 0;
+  if (review < 0 || recommended < 0 || highly < 0 || review > 1 || recommended > 1 || highly > 1) {
+    return ["los porcentajes de recomendación deben estar entre 0% y 100%"];
+  }
+  if (!(review <= recommended && recommended <= highly)) {
+    return ["la escala debe cumplir: Requiere revisión <= Recomendable <= Altamente recomendable"];
+  }
+  return [];
 }
 
 function templateStructureIssues(draft: TemplateDraft) {
@@ -512,13 +562,7 @@ function App() {
   const [templateAiText, setTemplateAiText] = React.useState("");
   const [templateAiFile, setTemplateAiFile] = React.useState<File | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = React.useState(false);
-  const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>({
-    name: "",
-    description: "",
-    ai_evaluation_locked: true,
-    categories: [blankCategory()],
-    criteria: [],
-  });
+  const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>(blankTemplateDraft());
   const [notice, setNotice] = React.useState("Listo");
   const [busy, setBusy] = React.useState(false);
 
@@ -946,7 +990,7 @@ function App() {
 
   function openTemplateEditor(action: "new" | "edit" | "duplicate") {
     if (action === "new" || !selectedTemplate) {
-      setTemplateDraft({ name: "", description: "", ai_evaluation_locked: true, categories: [blankCategory()], criteria: [] });
+      setTemplateDraft(blankTemplateDraft());
     } else {
       setTemplateDraft(toTemplateDraft(selectedTemplate, action === "duplicate"));
     }
@@ -976,8 +1020,12 @@ function App() {
     try {
       const generated = await api<TemplateDraft>("/templates/generate-ai", { method: "POST", body: form });
       setTemplateDraft({
+        ...DEFAULT_RECOMMENDATION_SCALE,
         ...generated,
         id: undefined,
+        highly_recommended_threshold: generated.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold,
+        recommended_threshold: generated.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold,
+        review_threshold: generated.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold,
         categories: generated.categories.map((category, index) => ({ ...category, id: undefined, order_index: index })),
         criteria: generated.criteria.map((criterion, index) => ({ ...criterion, id: undefined, order_index: index })),
       });
@@ -1049,6 +1097,13 @@ function App() {
     });
   }
 
+  function updateTemplateScale(field: "highly_recommended_threshold" | "recommended_threshold" | "review_threshold", rawPercent: string) {
+    setTemplateDraft((current) => ({
+      ...current,
+      [field]: clampWeight(fromPercentInput(rawPercent)),
+    }));
+  }
+
   function distributeTemplateWeights() {
     setTemplateDraft((current) => normalizeWeightsEvenly(current));
     setNotice("Pesos distribuidos automáticamente.");
@@ -1103,6 +1158,11 @@ function App() {
       setNotice(`Completa la estructura mínima: ${structureIssues.join(", ")}.`);
       return;
     }
+    const scaleIssues = templateScaleIssues(draftToSave);
+    if (scaleIssues.length) {
+      setNotice(`Revisa la escala de recomendación: ${scaleIssues.join(", ")}.`);
+      return;
+    }
     let weightIssues = templateWeightIssues(draftToSave);
     if (weightIssues.length) {
       const shouldNormalize = window.confirm(
@@ -1125,6 +1185,9 @@ function App() {
       name: draftToSave.name.trim(),
       description: draftToSave.description.trim(),
       ai_evaluation_locked: draftToSave.ai_evaluation_locked,
+      highly_recommended_threshold: Number(draftToSave.highly_recommended_threshold) || 0,
+      recommended_threshold: Number(draftToSave.recommended_threshold) || 0,
+      review_threshold: Number(draftToSave.review_threshold) || 0,
       categories: draftToSave.categories.map((category, index) => ({
         name: category.name.trim(),
         weight: Number(category.weight) || 0,
@@ -1576,6 +1639,62 @@ function App() {
                 />
                 Bloquear edición manual de puntuación, evidencia y documentos en criterios IA
               </label>
+
+              <section className="mb-4 rounded-lg border border-[#d9e6e5] bg-[#fbfdfc] p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">Escala de recomendación</h3>
+                    <span className={mutedTextClass}>Estos cortes se aplican al score global del perfil.</span>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${templateScaleIssues(templateDraft).length ? "bg-[#fee2e2] text-[#9a3412]" : "bg-[#e6f1ef] text-brand"}`}>
+                    {templateScaleIssues(templateDraft).length ? "Revisar escala" : "Escala válida"}
+                  </span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <label className="relative text-sm font-semibold">
+                    <span className="mb-1 block text-xs text-[#25464a]">Altamente recomendable desde</span>
+                    <input
+                      className={`${inputClass} pr-7`}
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={toPercentInput(templateDraft.highly_recommended_threshold)}
+                      onWheel={ignoreNumberWheel}
+                      onChange={(event) => updateTemplateScale("highly_recommended_threshold", event.target.value)}
+                    />
+                    <span className="pointer-events-none absolute right-2 top-[2.15rem] text-sm font-semibold text-muted">%</span>
+                  </label>
+                  <label className="relative text-sm font-semibold">
+                    <span className="mb-1 block text-xs text-[#25464a]">Recomendable desde</span>
+                    <input
+                      className={`${inputClass} pr-7`}
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={toPercentInput(templateDraft.recommended_threshold)}
+                      onWheel={ignoreNumberWheel}
+                      onChange={(event) => updateTemplateScale("recommended_threshold", event.target.value)}
+                    />
+                    <span className="pointer-events-none absolute right-2 top-[2.15rem] text-sm font-semibold text-muted">%</span>
+                  </label>
+                  <label className="relative text-sm font-semibold">
+                    <span className="mb-1 block text-xs text-[#25464a]">Requiere revisión desde</span>
+                    <input
+                      className={`${inputClass} pr-7`}
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={toPercentInput(templateDraft.review_threshold)}
+                      onWheel={ignoreNumberWheel}
+                      onChange={(event) => updateTemplateScale("review_threshold", event.target.value)}
+                    />
+                    <span className="pointer-events-none absolute right-2 top-[2.15rem] text-sm font-semibold text-muted">%</span>
+                  </label>
+                </div>
+              </section>
 
               <section className="grid gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2040,7 +2159,10 @@ function App() {
                         <span className="rounded-md bg-[#e6f1ef] px-3 py-2 text-sm font-bold text-brand">
                           Score global: {selectedSummary ? `${toPercentInput(selectedSummary.global_score)}%` : "Sin calcular"}
                         </span>
-                        <span className={`rounded-md px-3 py-2 text-sm font-bold ${recommendationClass(selectedSummary?.recommendation)}`}>
+                        <span
+                          className={`rounded-md px-3 py-2 text-sm font-bold ${recommendationClass(selectedSummary?.recommendation)}`}
+                          title={recommendationScaleTitle(selectedTemplate)}
+                        >
                           {selectedSummary?.recommendation ?? "Sin recomendación"}
                         </span>
                       </div>

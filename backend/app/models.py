@@ -28,6 +28,9 @@ class Template(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     ai_evaluation_locked: Mapped[bool] = mapped_column(Boolean, default=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    highly_recommended_threshold: Mapped[float] = mapped_column(Float, default=0.85)
+    recommended_threshold: Mapped[float] = mapped_column(Float, default=0.7)
+    review_threshold: Mapped[float] = mapped_column(Float, default=0.55)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     criteria: Mapped[list["Criterion"]] = relationship(

@@ -1,23 +1,40 @@
 from collections import defaultdict
 
-from app.models import Candidate, Criterion, Score, ScoreFileReference
+from app.models import Candidate, Criterion, Score, ScoreFileReference, Template
 
 
 BONUS_GLOBAL_WEIGHT = 0.05
 BONUS_CATEGORY_NAME = "Bonificación adicional"
+DEFAULT_HIGHLY_RECOMMENDED_THRESHOLD = 0.85
+DEFAULT_RECOMMENDED_THRESHOLD = 0.7
+DEFAULT_REVIEW_THRESHOLD = 0.55
 
 
-def recommendation(global_score: float) -> str:
-    if global_score >= 0.85:
+def threshold_value(template: Template | None, field: str, default: float) -> float:
+    value = getattr(template, field, None)
+    return default if value is None else float(value)
+
+
+def recommendation_scale(template: Template | None = None) -> dict[str, float]:
+    return {
+        "highly_recommended": threshold_value(template, "highly_recommended_threshold", DEFAULT_HIGHLY_RECOMMENDED_THRESHOLD),
+        "recommended": threshold_value(template, "recommended_threshold", DEFAULT_RECOMMENDED_THRESHOLD),
+        "review": threshold_value(template, "review_threshold", DEFAULT_REVIEW_THRESHOLD),
+    }
+
+
+def recommendation(global_score: float, template: Template | None = None) -> str:
+    scale = recommendation_scale(template)
+    if global_score >= scale["highly_recommended"]:
         return "Altamente recomendable"
-    if global_score >= 0.7:
+    if global_score >= scale["recommended"]:
         return "Recomendable"
-    if global_score >= 0.55:
+    if global_score >= scale["review"]:
         return "Requiere revisión"
     return "No recomendable"
 
 
-def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict:
+def summarize_candidate(candidate: Candidate, criteria: list[Criterion], template: Template | None = None) -> dict:
     score_by_criterion = {score.criterion_id: score.score for score in candidate.scores}
     failed_critical = [
         criterion
@@ -61,7 +78,8 @@ def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict
         "bonus_score": round(bonus_score, 2),
         "bonus_amount": round(0.0 if failed_critical else min(bonus_amount, max(0.0, 1.0 - base_global)), 4),
         "bonus_rationale": candidate.ai_bonus_rationale or "",
-        "recommendation": "No califica por criterio crítico" if failed_critical else recommendation(normalized_global),
+        "recommendation": "No califica por criterio crítico" if failed_critical else recommendation(normalized_global, template),
+        "recommendation_scale": recommendation_scale(template),
         "categories": categories,
     }
 

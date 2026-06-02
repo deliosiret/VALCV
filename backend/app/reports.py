@@ -284,7 +284,7 @@ def conclusion_text(summary: dict, template: Template) -> str:
 def build_candidate_report(candidate: Candidate, template: Template, criteria: list[Criterion]) -> BytesIO:
     document = Document()
     configure(document)
-    summary = summarize_candidate(candidate, criteria)
+    summary = summarize_candidate(candidate, criteria, template)
 
     add_cover(document, candidate, template, summary)
     category_narrative(document, template, summary)
