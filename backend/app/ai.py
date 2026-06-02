@@ -35,6 +35,19 @@ def _extract_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
+def generate_config(model: str) -> types.GenerateContentConfig:
+    model_name = model.lower()
+    thinking_config = None
+    if model_name.startswith("gemini-3"):
+        thinking_config = types.ThinkingConfig(thinking_level="low")
+    elif model_name.startswith(("gemini-2.5-flash", "gemini-2.5-flash-lite")):
+        thinking_config = types.ThinkingConfig(thinking_budget=0)
+    return types.GenerateContentConfig(
+        response_mime_type="application/json",
+        thinking_config=thinking_config,
+    )
+
+
 def evaluate_candidate_with_gemini(
     candidate: Candidate,
     criteria: list[Criterion],
@@ -87,10 +100,7 @@ def evaluate_candidate_with_gemini(
     response = client.models.generate_content(
         model=model,
         contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
-        ),
+        config=generate_config(model),
     )
     payload = _extract_json(response.text or "{}")
     return payload.get("scores", [])
@@ -140,9 +150,6 @@ def generate_template_with_gemini(
     response = client.models.generate_content(
         model=model,
         contents=[types.Content(role="user", parts=parts)],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
-        ),
+        config=generate_config(model),
     )
     return _extract_json(response.text or "{}")
