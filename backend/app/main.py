@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai import evaluate_candidate_with_gemini, generate_template_with_gemini
+from app.ai import evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
@@ -62,6 +62,26 @@ def clean_file_ids(raw_file_ids, valid_file_ids: set[int]) -> list[int]:
         if file_id in valid_file_ids:
             cleaned.append(file_id)
     return list(dict.fromkeys(cleaned))
+
+
+def evaluation_snapshot(candidate: Candidate, criteria: list[Criterion]) -> list[dict]:
+    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
+    rows = []
+    for criterion in criteria:
+        score = score_by_criterion.get(criterion.id)
+        rows.append(
+            {
+                "criterion_id": criterion.id,
+                "code": criterion.code,
+                "category": criterion.category,
+                "aspect": criterion.aspect,
+                "score": score.score if score else None,
+                "rationale": score.rationale if score else "",
+                "evaluator_note": score.evaluator_note if score else "",
+                "source": score.source if score else "",
+            }
+        )
+    return rows
 
 
 def safe_filename(value: str) -> str:
@@ -414,6 +434,12 @@ def ensure_schema():
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE candidates ADD COLUMN evaluator_user_id INTEGER REFERENCES users(id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_candidates_evaluator_user_id ON candidates(evaluator_user_id)"))
+    if "ai_bonus_score" not in candidate_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE candidates ADD COLUMN ai_bonus_score DOUBLE PRECISION NOT NULL DEFAULT 0"))
+    if "ai_bonus_rationale" not in candidate_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE candidates ADD COLUMN ai_bonus_rationale TEXT NOT NULL DEFAULT ''"))
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     user_column_defaults = {
         "first_name": "VARCHAR(80) NOT NULL DEFAULT ''",
@@ -773,6 +799,8 @@ def reset_candidate_evaluation(candidate_id: int, _: User = Depends(require_perm
     delete_uploaded_files(candidate.files)
     candidate.files.clear()
     candidate.scores.clear()
+    candidate.ai_bonus_score = 0
+    candidate.ai_bonus_rationale = ""
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 
@@ -853,6 +881,9 @@ def candidate_report(candidate_id: int, _: User = Depends(require_permission("vi
 def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
+    if payload:
+        candidate.ai_bonus_score = 0
+        candidate.ai_bonus_rationale = ""
     valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
     for item in payload:
         criterion = db.query(Criterion).filter(Criterion.id == item.criterion_id).first()
@@ -908,6 +939,21 @@ def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluat
         score = max(0.0, min(score, 5.0))
         file_ids = clean_file_ids(item.get("file_ids", []), valid_file_ids)
         upsert_score(db, candidate.id, criterion_id, score, "automatic", str(item.get("rationale", "")), file_ids)
+    db.flush()
+    refreshed_candidate = get_candidate_or_404(db, candidate_id)
+    try:
+        bonus = evaluate_candidate_bonus_with_gemini(
+            refreshed_candidate,
+            list(template.criteria),
+            evaluation_snapshot(refreshed_candidate, list(template.criteria)),
+            settings.upload_dir,
+            api_key,
+            model,
+        )
+        refreshed_candidate.ai_bonus_score = max(0.0, min(float(bonus.get("bonus_score", 0) or 0), 5.0))
+        refreshed_candidate.ai_bonus_rationale = str(bonus.get("rationale", "") or "")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"No se pudo calcular la bonificación adicional: {exc}") from exc
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 
@@ -935,6 +981,8 @@ def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User =
         score = max(0.0, min(float(item.get("score", 0)), 5.0))
         file_ids = clean_file_ids(item.get("file_ids", []), valid_file_ids)
         upsert_score(db, candidate.id, criterion.id, score, "automatic", str(item.get("rationale", "")), file_ids)
+        candidate.ai_bonus_score = 0
+        candidate.ai_bonus_rationale = ""
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 

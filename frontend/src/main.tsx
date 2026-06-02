@@ -15,6 +15,7 @@ import {
   Save,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Trash2,
   UserRoundPlus,
@@ -168,6 +169,8 @@ type Candidate = {
   evaluator: string;
   evaluator_user_id?: number | null;
   comments: string;
+  ai_bonus_score: number;
+  ai_bonus_rationale: string;
   files: { id: number; original_name: string; mime_type: string; size_bytes: number }[];
   scores: Score[];
 };
@@ -1543,7 +1546,7 @@ function App() {
                   <div>
                     <h3 className="text-sm font-semibold text-ink">Categorías y criterios</h3>
                     <span className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${percentStatus(templateDraft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0)).className}`}>
-                      Categorías: {percentStatus(templateDraft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0)).text}
+                      Total de categorías: {percentStatus(templateDraft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0)).text}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1599,7 +1602,7 @@ function App() {
 
                       <div className="grid gap-2 bg-[#fbfdfc] p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#486366]">Criterios ponderados de esta categoría</span>
+                          <span className="text-xs font-bold text-[#486366]">Criterios dentro de esta categoría</span>
                           {childStatus ? (
                             <span className={`rounded-full px-2 py-1 text-xs font-semibold ${childStatus.className}`}>
                               {childStatus.text}
@@ -1838,6 +1841,21 @@ function App() {
                     }}
                   />
                 </label>
+                {(selectedCandidate.ai_bonus_score ?? 0) > 0 ? (
+                  <section className="mb-3 rounded-md border border-[#cfe0df] bg-[#f4faf9] p-3 text-sm text-[#25464a]">
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="flex items-center gap-2 font-semibold text-ink">
+                        <Sparkles size={16} /> Bonificación adicional
+                      </h3>
+                      <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-xs font-bold text-brand">
+                        {toPercentInput(Math.min(0.05, ((selectedCandidate.ai_bonus_score ?? 0) / 5) * 0.05))}% global
+                      </span>
+                    </div>
+                    <p className="leading-relaxed text-muted">
+                      Segundo turno de IA: {selectedCandidate.ai_bonus_rationale}
+                    </p>
+                  </section>
+                ) : null}
                 <div className="grid gap-4">
                   {criteriaGroups.map((group, groupIndex) => (
                     <section className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={group.category}>

@@ -118,6 +118,8 @@ class CandidateOut(BaseModel):
     evaluator: str
     evaluator_user_id: int | None = None
     comments: str
+    ai_bonus_score: float = 0
+    ai_bonus_rationale: str = ""
     created_at: datetime
     files: list[FileOut]
     scores: list[ScoreOut]

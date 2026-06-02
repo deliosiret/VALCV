@@ -48,6 +48,18 @@ def generate_config(model: str) -> types.GenerateContentConfig:
     )
 
 
+def candidate_document_parts(candidate: Candidate, upload_dir: str) -> list:
+    parts: list = []
+    for file in candidate.files:
+        path = Path(upload_dir) / file.stored_name
+        mime_type = file.mime_type or mimetypes.guess_type(file.original_name)[0] or "application/octet-stream"
+        if mime_type not in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}:
+            continue
+        parts.append(types.Part.from_text(text=f"Documento disponible: id={file.id}, nombre={file.original_name}"))
+        parts.append(types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type))
+    return parts
+
+
 def evaluate_candidate_with_gemini(
     candidate: Candidate,
     criteria: list[Criterion],
@@ -87,14 +99,7 @@ def evaluate_candidate_with_gemini(
         f"Candidato: {candidate.name}. Criterios automáticos: {json.dumps(rubric, ensure_ascii=False)}"
     )
 
-    parts: list = [types.Part.from_text(text=prompt)]
-    for file in candidate.files:
-        path = Path(upload_dir) / file.stored_name
-        mime_type = file.mime_type or mimetypes.guess_type(file.original_name)[0] or "application/octet-stream"
-        if mime_type not in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}:
-            continue
-        parts.append(types.Part.from_text(text=f"Documento disponible: id={file.id}, nombre={file.original_name}"))
-        parts.append(types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type))
+    parts: list = [types.Part.from_text(text=prompt), *candidate_document_parts(candidate, upload_dir)]
 
     contents = [types.Content(role="user", parts=parts)]
     response = client.models.generate_content(
@@ -104,6 +109,54 @@ def evaluate_candidate_with_gemini(
     )
     payload = _extract_json(response.text or "{}")
     return payload.get("scores", [])
+
+
+def evaluate_candidate_bonus_with_gemini(
+    candidate: Candidate,
+    criteria: list[Criterion],
+    evaluation_snapshot: list[dict],
+    upload_dir: str,
+    api_key: str | None,
+    model: str,
+) -> dict:
+    if not api_key:
+        raise RuntimeError("Configura la API key de Gemini antes de evaluar con IA.")
+    if not candidate.files:
+        raise RuntimeError("El candidato no tiene archivos de expediente cargados.")
+
+    rubric = [
+        {
+            "id": criterion.id,
+            "code": criterion.code,
+            "category": criterion.category,
+            "aspect": criterion.aspect,
+            "notes": criterion.notes,
+            "is_critical": criterion.is_critical,
+            "evaluation_mode": criterion.evaluation_mode.value if hasattr(criterion.evaluation_mode, "value") else str(criterion.evaluation_mode),
+        }
+        for criterion in criteria
+    ]
+    prompt = (
+        "Segundo turno de evaluación. Ya existe una evaluación sobria por criterios; no recalifiques esos criterios. "
+        "Analiza el expediente completo y el resultado ya calculado para decidir si corresponde una bonificación adicional global. "
+        "La bonificación solo aplica por elementos claramente positivos, documentados y relevantes para el perfil que no hayan sido "
+        "capturados suficientemente por las categorías o criterios existentes. No bonifiques por lo que ya fue plenamente puntuado, "
+        "no dupliques credenciales, experiencia, cargos, proyectos ni formación ya agotados en la evaluación. "
+        "Devuelve únicamente JSON válido con la forma "
+        '{"bonus_score":number,"rationale":"texto breve"}. '
+        "bonus_score va de 0 a 5: 0 sin bonificación, 1 marginal, 2 baja, 3 moderada, 4 alta, 5 excepcional. "
+        "Sé conservador: la bonificación debe ser excepcional o claramente justificable, y no sustituye requisitos críticos ni criterios no cumplidos. "
+        f"Candidato: {candidate.name}. Criterios del perfil: {json.dumps(rubric, ensure_ascii=False)}. "
+        f"Evaluación ya registrada: {json.dumps(evaluation_snapshot, ensure_ascii=False)}"
+    )
+    client = genai.Client(api_key=api_key)
+    parts: list = [types.Part.from_text(text=prompt), *candidate_document_parts(candidate, upload_dir)]
+    response = client.models.generate_content(
+        model=model,
+        contents=[types.Content(role="user", parts=parts)],
+        config=generate_config(model),
+    )
+    return _extract_json(response.text or "{}")
 
 
 def generate_template_with_gemini(

@@ -131,6 +131,21 @@ def sync_initial_template_guidance(db, template):
                 criterion.within_category_weight = 0.0 if expected_critical else criterion.within_category_weight
                 criterion.global_weight = 0.0 if expected_critical else criterion.category_weight * criterion.within_category_weight
                 changed = True
+
+    present_categories = [category for category in template.categories if any(criterion.category == category.name for criterion in template.criteria)]
+    present_total = sum(float(category.weight or 0) for category in present_categories)
+    if present_categories and abs(present_total - 1.0) > 0.0001:
+        for category in present_categories:
+            category.weight = float(category.weight or 0) / present_total
+            changed = True
+
+    category_weights = {category.name: float(category.weight or 0) for category in template.categories}
+    for criterion in template.criteria:
+        resolved_category_weight = category_weights.get(criterion.category, criterion.category_weight)
+        if abs(float(criterion.category_weight or 0) - resolved_category_weight) > 0.0001:
+            criterion.category_weight = resolved_category_weight
+            criterion.global_weight = 0.0 if criterion.is_critical else criterion.category_weight * criterion.within_category_weight
+            changed = True
     if changed:
         db.commit()
 

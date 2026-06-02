@@ -173,6 +173,8 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
         body(document, f"Descripción del perfil: {template.description}")
 
     rows = [[category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))] for category in template.categories]
+    if summary.get("bonus_score", 0) > 0:
+        rows.append(["Bonificación adicional", f"Hasta {percent(0.05)}", percent(summary.get("categories", {}).get("Bonificación adicional", 0))])
     add_table(document, ["Categoría", "Participación en el resultado final", "Resultado del candidato"], rows)
 
 
@@ -234,6 +236,20 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
                 body(document, f"Observación del evaluador: {score.evaluator_note}")
 
 
+def bonus_narrative(document: Document, summary: dict) -> None:
+    if summary.get("bonus_score", 0) <= 0:
+        return
+    heading(document, "Bonificación adicional")
+    body(
+        document,
+        f"Después de la evaluación por criterios, se reconoció una bonificación adicional de "
+        f"{score_text(summary.get('bonus_score'))}, con un impacto global de {percent(summary.get('bonus_amount', 0))}. "
+        "Esta bonificación se aplica de forma separada y el resultado final nunca puede exceder el 100%.",
+    )
+    if summary.get("bonus_rationale"):
+        body(document, f"Justificación: {summary['bonus_rationale']}")
+
+
 def conclusion_text(summary: dict, template: Template) -> str:
     if summary["recommendation"] == "No califica por criterio crítico":
         return (
@@ -267,6 +283,7 @@ def build_candidate_report(candidate: Candidate, template: Template, criteria: l
     weights_narrative(document, template, criteria)
     document.add_section(WD_SECTION.NEW_PAGE)
     evaluation_narrative(document, candidate, criteria)
+    bonus_narrative(document, summary)
 
     heading(document, "Observaciones generales")
     body(document, candidate.comments or "No se registraron observaciones generales para este candidato.")

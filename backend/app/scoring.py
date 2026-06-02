@@ -3,6 +3,10 @@ from collections import defaultdict
 from app.models import Candidate, Criterion, Score, ScoreFileReference
 
 
+BONUS_GLOBAL_WEIGHT = 0.05
+BONUS_CATEGORY_NAME = "Bonificación adicional"
+
+
 def recommendation(global_score: float) -> str:
     if global_score >= 0.85:
         return "Altamente recomendable"
@@ -41,13 +45,22 @@ def summarize_candidate(candidate: Candidate, criteria: list[Criterion]) -> dict
         category: round((category_points[category] / max(weight, 0.00001)), 4)
         for category, weight in category_max.items()
     }
-    normalized_global = 0.0 if failed_critical else global_score / max(total_global_weight, 0.00001)
+    base_global = global_score / max(total_global_weight, 0.00001)
+    bonus_score = max(0.0, min(float(candidate.ai_bonus_score or 0), 5.0))
+    bonus_amount = (bonus_score / 5.0) * BONUS_GLOBAL_WEIGHT
+    normalized_global = 0.0 if failed_critical else min(1.0, base_global + bonus_amount)
+    if bonus_score > 0 and not failed_critical:
+        categories[BONUS_CATEGORY_NAME] = round(bonus_score / 5.0, 4)
 
     return {
         "id": candidate.id,
         "name": candidate.name,
         "document_id": candidate.document_id,
         "global_score": round(normalized_global, 4),
+        "base_global_score": round(0.0 if failed_critical else base_global, 4),
+        "bonus_score": round(bonus_score, 2),
+        "bonus_amount": round(0.0 if failed_critical else min(bonus_amount, max(0.0, 1.0 - base_global)), 4),
+        "bonus_rationale": candidate.ai_bonus_rationale or "",
         "recommendation": "No califica por criterio crítico" if failed_critical else recommendation(normalized_global),
         "categories": categories,
     }
