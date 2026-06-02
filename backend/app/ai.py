@@ -16,8 +16,8 @@ Reglas institucionales de evaluación:
 - Una maestría no debe contarse dos veces. Si una misma maestría cumple un criterio especializado, no debe volver a sumar como maestría genérica, salvo que exista otra maestría distinta documentada.
 - No sustituyas un requisito de maestría con cursos, diplomados, talleres, seminarios o experiencia laboral. Si el criterio pide maestría y no hay maestría documentada, asigna 0.
 - Si una maestría está en curso, pendiente de tesis, pendiente de grado o no consta como concluida, no debe recibir puntuación plena; usa una puntuación conservadora según avance y pertinencia.
-- Diferencia estrictamente certificación, diplomado y curso. Una certificación normalmente acredita competencia mediante una entidad certificadora, examen, licencia, estándar, credencial profesional o certificado formal de competencia; un diplomado es formación académica estructurada; un curso es capacitación puntual y no debe tratarse como certificación ni como diplomado.
-- Dentro de una categoría, premia cantidad, nivel, pertinencia y actualidad de postgrados, certificaciones y diplomados solo mientras exista margen de puntuación en el criterio correspondiente. Nunca excedas 5 puntos por criterio.
+- Diferencia estrictamente las certificaciones internacionales o profesionales de la formación complementaria. Una certificación normalmente acredita competencia mediante una entidad certificadora, examen, licencia, estándar, credencial profesional o certificado formal de competencia; no trates cursos, talleres, seminarios ni diplomados como certificaciones internacionales.
+- Los diplomados, cursos, talleres y seminarios pueden valorarse juntos como formación complementaria cuando el criterio así lo indique. Premia cantidad, nivel, duración, pertinencia, actualidad y entidad emisora solo mientras exista margen de puntuación en el criterio correspondiente. Nunca excedas 5 puntos por criterio.
 - Para formación, prioriza relevancia regulatoria, eléctrica, energética y de mercados eléctricos sobre formación genérica de otros sectores.
 - Si la evidencia es ambigua, incompleta o no verificable en los documentos, asigna una puntuación conservadora y explícalo.
 """.strip()
@@ -136,8 +136,8 @@ def generate_template_with_gemini(
         "En notes escribe instrucciones concretas para evaluar ese criterio, especialmente para criterios automáticos. "
         "Si el cargo es de encargado, gerente, director o nivel equivalente, incluye categorías para aspectos estratégicos, "
         "competencias normativas e institucionales y competencias técnicas regulatorias, con ponderaciones explícitas. "
-        "Para criterios de formación, separa maestría, postgrado, certificación, diplomado y curso cuando aplique, e indica en notes "
-        "que una misma credencial no debe contarse dos veces. "
+        "Para criterios de formación, separa las certificaciones internacionales/profesionales de los cursos y diplomados; "
+        "estos últimos pueden agruparse como formación complementaria cuando aplique. Indica en notes que una misma credencial no debe contarse dos veces. "
         "Evita códigos visibles; code puede ir vacío. Crea una plantilla compacta, clara y utilizable, no una tabla copiada. "
         f"Requisitos escritos: {requirements_text.strip() or 'No suministrados por texto.'}"
     )

@@ -34,7 +34,7 @@ CRITERION_GUIDANCE = {
         "notes": "Valorar únicamente certificaciones profesionales o internacionales verificables en áreas del perfil. No considerar cursos, talleres, seminarios ni diplomados como certificaciones. Si el documento solo evidencia participación o capacitación sin credencial certificadora clara, asignar una puntuación conservadora. Premiar cantidad, vigencia, entidad emisora, nivel y pertinencia, sin exceder 5.",
     },
     "F5": {
-        "notes": "Valorar únicamente diplomados estructurados y verificables en áreas del perfil. No contar cursos, talleres o seminarios puntuales como diplomados, ni contar certificaciones como diplomados. Premiar cantidad, nivel, duración aparente y pertinencia, sin exceder 5.",
+        "notes": "Valorar diplomados, cursos, talleres, seminarios o programas de capacitación verificables en áreas relacionadas con el perfil. No contarlos como certificaciones internacionales o profesionales. Premiar pertinencia, duración, nivel, entidad emisora, actualidad y cantidad, sin exceder 5.",
     },
     "E1": {
         "notes": "Valorar años documentados de experiencia en el sector eléctrico. No duplicar el mismo periodo laboral para inflar años; considerar solapamientos de fechas de forma conservadora.",
@@ -57,7 +57,7 @@ CRITERION_GUIDANCE = {
 }
 
 CRITERION_ASPECT_UPDATES = {
-    "F5": "Diplomados en las áreas mencionadas más arriba",
+    "F5": "Diplomados y cursos especializados en las áreas mencionadas más arriba",
 }
 
 INITIAL_CRITERIA = [
@@ -65,7 +65,7 @@ INITIAL_CRITERIA = [
     ("F2", "Formación académica y requisitos básicos", "Maestría en regulación, energía, mercados eléctricos o áreas afines", 0.15, 0.4, 0.06, ""),
     ("F3", "Formación académica y requisitos básicos", "Maestría en áreas comercial, industrial, calidad y afines", 0.15, 0.3, 0.045, ""),
     ("F4", "Formación académica y requisitos básicos", "Certificaciones internacionales en las áreas mencionadas más arriba", 0.15, 0.2, 0.03, ""),
-    ("F5", "Formación académica y requisitos básicos", "Diplomados en las áreas mencionadas más arriba", 0.15, 0.1, 0.015, ""),
+    ("F5", "Formación académica y requisitos básicos", "Diplomados y cursos especializados en las áreas mencionadas más arriba", 0.15, 0.1, 0.015, ""),
     ("E1", "Experiencia profesional y liderazgo", "Mínimo 5 años de experiencia en el sector eléctrico", 0.2, 0.3, 0.06, ""),
     ("E2", "Experiencia profesional y liderazgo", "Al menos 3 años de experiencia en posiciones técnicas o regulatorias", 0.2, 0.2, 0.04, ""),
     ("E3", "Experiencia profesional y liderazgo", "Al menos 3 años en funciones de liderazgo, normativa o regulación", 0.2, 0.3, 0.06, ""),

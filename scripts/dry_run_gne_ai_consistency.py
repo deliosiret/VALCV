@@ -73,8 +73,8 @@ def review_flags(criteria_by_code: dict[str, Criterion], scores: dict[int, dict]
             flags.append("Revisar F4: la explicación menciona curso sin evidencia clara de certificación.")
     if f5:
         rationale = str(scores.get(f5.id, {}).get("rationale", "")).lower()
-        if "certific" in rationale and "diplom" not in rationale:
-            flags.append("Revisar F5: la explicación parece mezclar certificaciones con diplomados.")
+        if "certific" in rationale and not any(word in rationale for word in ("curso", "diplom", "taller", "seminario", "capacitación")):
+            flags.append("Revisar F5: la explicación parece usar certificaciones como formación complementaria.")
     return flags
 
 
