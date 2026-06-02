@@ -169,6 +169,7 @@ type Candidate = {
   evaluator: string;
   evaluator_user_id?: number | null;
   comments: string;
+  final_decision: string;
   ai_bonus_score: number;
   ai_bonus_rationale: string;
   files: { id: number; original_name: string; mime_type: string; size_bytes: number }[];
@@ -183,6 +184,12 @@ type SummaryCandidate = {
   recommendation: string;
   categories: Record<string, number>;
 };
+
+function decisionLabel(value?: string) {
+  if (value === "qualifies") return "Califica";
+  if (value === "not_qualifies") return "No califica";
+  return "Sin definir";
+}
 
 type AISettings = {
   gemini_api_key_configured: boolean;
@@ -831,6 +838,23 @@ function App() {
     }
   }
 
+  async function setCandidateDecision(final_decision: "qualifies" | "not_qualifies") {
+    if (!selectedCandidate) return;
+    setBusy(true);
+    try {
+      await api<Candidate>(`/candidates/${selectedCandidate.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ final_decision }),
+      });
+      setNotice(`Decisión guardada: ${decisionLabel(final_decision)}`);
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo guardar la decisión");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runAi() {
     if (!selectedCandidate) return;
     setBusy(true);
@@ -1152,6 +1176,7 @@ function App() {
   }
 
   const summaryForCharts = [...summary].sort((left, right) => right.global_score - left.global_score);
+  const selectedSummary = selectedCandidate ? summary.find((candidate) => candidate.id === selectedCandidate.id) : undefined;
   const radarData = categories.map((category) => ({
     category: category.replace("Competencias ", "").replace("Formación académica y requisitos básicos", "Formación"),
     ...(summaryForCharts.reduce((acc, candidate) => ({ ...acc, [candidate.name]: Math.round((candidate.categories[category] ?? 0) * 100) }), {})),
@@ -1827,20 +1852,6 @@ function App() {
                     </span>
                   ))}
                 </div>
-                <label className="mb-3 grid gap-1.5 rounded-md border border-[#e5eeee] bg-[#fbfdfc] p-3 text-sm font-semibold text-[#25464a]">
-                  Comentarios y observaciones generales sobre el candidato
-                  <textarea
-                    className={`${inputClass} min-h-24 resize-y bg-white text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2]`}
-                    placeholder="Anota aquí observaciones generales del expediente, puntos a revisar, impresión global o comentarios para Recursos Humanos."
-                    value={candidateComments}
-                    disabled={!canEvaluateCandidates}
-                    onChange={(event) => {
-                      setCandidateComments(event.target.value);
-                      setCandidateCommentsDirty(true);
-                      setAutosaveState("saving");
-                    }}
-                  />
-                </label>
                 {(selectedCandidate.ai_bonus_score ?? 0) > 0 ? (
                   <section className="mb-3 rounded-md border border-[#cfe0df] bg-[#f4faf9] p-3 text-sm text-[#25464a]">
                     <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -2008,6 +2019,62 @@ function App() {
                       </div>
                     </section>
                   ))}
+                  <section className="rounded-lg border border-[#b9d0cf] bg-white p-3 shadow-sm">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-[#e5eeee] pb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-ink">Cierre de evaluación</h3>
+                        <span className={mutedTextClass}>Resultado global y decisión manual del evaluador</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-[#e6f1ef] px-3 py-2 text-sm font-bold text-brand">
+                          Score global: {selectedSummary ? `${toPercentInput(selectedSummary.global_score)}%` : "Sin calcular"}
+                        </span>
+                        <span className="rounded-md bg-[#f4e8de] px-3 py-2 text-sm font-bold text-[#9a3412]">
+                          {selectedSummary?.recommendation ?? "Sin recomendación"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                      <div>
+                        <strong className="text-sm text-[#25464a]">Decisión del evaluador</strong>
+                        <span className={mutedTextClass}>Decisión humana final: {decisionLabel(selectedCandidate.final_decision)}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className={`${buttonClass} ${selectedCandidate.final_decision === "qualifies" ? "bg-[#16697a]" : "bg-[#486366]"}`}
+                          type="button"
+                          disabled={busy || !canEvaluateCandidates}
+                          onClick={() => setCandidateDecision("qualifies")}
+                        >
+                          Califica
+                        </button>
+                        <button
+                          className={`${buttonClass} ${selectedCandidate.final_decision === "not_qualifies" ? "bg-[#9a3412]" : "bg-[#486366]"}`}
+                          type="button"
+                          disabled={busy || !canEvaluateCandidates}
+                          onClick={() => setCandidateDecision("not_qualifies")}
+                        >
+                          No califica
+                        </button>
+                      </div>
+                    </div>
+
+                    <label className="grid gap-1.5 text-sm font-semibold text-[#25464a]">
+                      Comentarios y observaciones generales sobre el candidato
+                      <textarea
+                        className={`${inputClass} min-h-24 resize-y bg-white text-sm disabled:cursor-not-allowed disabled:bg-[#eef2f2]`}
+                        placeholder="Anota aquí observaciones generales del expediente, puntos a revisar, impresión global o comentarios para Recursos Humanos."
+                        value={candidateComments}
+                        disabled={!canEvaluateCandidates}
+                        onChange={(event) => {
+                          setCandidateComments(event.target.value);
+                          setCandidateCommentsDirty(true);
+                          setAutosaveState("saving");
+                        }}
+                      />
+                    </label>
+                  </section>
                 </div>
               </>
             ) : (

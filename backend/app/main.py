@@ -434,6 +434,9 @@ def ensure_schema():
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE candidates ADD COLUMN evaluator_user_id INTEGER REFERENCES users(id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_candidates_evaluator_user_id ON candidates(evaluator_user_id)"))
+    if "final_decision" not in candidate_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE candidates ADD COLUMN final_decision VARCHAR(24) NOT NULL DEFAULT ''"))
     if "ai_bonus_score" not in candidate_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE candidates ADD COLUMN ai_bonus_score DOUBLE PRECISION NOT NULL DEFAULT 0"))
@@ -778,7 +781,10 @@ def create_candidate(payload: CandidateCreate, user: User = Depends(require_perm
 @app.patch("/candidates/{candidate_id}", response_model=CandidateOut)
 def update_candidate(candidate_id: int, payload: CandidatePatch, _: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    row = payload.model_dump(exclude_unset=True)
+    if "final_decision" in row and row["final_decision"] not in {"", "qualifies", "not_qualifies"}:
+        raise HTTPException(status_code=400, detail="Decisión final inválida.")
+    for key, value in row.items():
         setattr(candidate, key, value)
     db.commit()
     return get_candidate_or_404(db, candidate_id)
@@ -799,6 +805,7 @@ def reset_candidate_evaluation(candidate_id: int, _: User = Depends(require_perm
     delete_uploaded_files(candidate.files)
     candidate.files.clear()
     candidate.scores.clear()
+    candidate.final_decision = ""
     candidate.ai_bonus_score = 0
     candidate.ai_bonus_rationale = ""
     db.commit()

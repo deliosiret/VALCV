@@ -85,6 +85,7 @@ class Candidate(Base):
     evaluator: Mapped[str] = mapped_column(String(120), default="")
     evaluator_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     comments: Mapped[str] = mapped_column(Text, default="")
+    final_decision: Mapped[str] = mapped_column(String(24), default="")
     ai_bonus_score: Mapped[float] = mapped_column(Float, default=0)
     ai_bonus_rationale: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

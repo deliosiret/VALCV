@@ -40,6 +40,14 @@ def report_recommendation(value: str) -> str:
     return value
 
 
+def final_decision_text(value: str) -> str:
+    if value == "qualifies":
+        return "Califica"
+    if value == "not_qualifies":
+        return "No califica"
+    return "No definida"
+
+
 def set_cell_shading(cell, fill: str) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     shd = OxmlElement("w:shd")
@@ -149,6 +157,7 @@ def add_cover(document: Document, candidate: Candidate, template: Template, summ
         ["Fecha de generación", datetime.now().strftime("%d/%m/%Y %H:%M")],
         ["Resultado global", percent(summary["global_score"])],
         ["Recomendación", report_recommendation(summary["recommendation"])],
+        ["Decisión del evaluador", final_decision_text(candidate.final_decision)],
     ]
     add_table(document, ["Dato", "Detalle"], rows)
 

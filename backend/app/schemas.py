@@ -74,6 +74,7 @@ class CandidatePatch(BaseModel):
     document_id: str | None = None
     evaluator: str | None = None
     comments: str | None = None
+    final_decision: str | None = None
     template_id: int | None = None
 
 
@@ -118,6 +119,7 @@ class CandidateOut(BaseModel):
     evaluator: str
     evaluator_user_id: int | None = None
     comments: str
+    final_decision: str = ""
     ai_bonus_score: float = 0
     ai_bonus_rationale: str = ""
     created_at: datetime
