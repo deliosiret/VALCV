@@ -191,6 +191,17 @@ function decisionLabel(value?: string) {
   return "Sin definir";
 }
 
+function recommendationClass(value?: string) {
+  const normalized = (value ?? "").toLowerCase();
+  if (normalized.includes("no recomendable") || normalized.includes("no califica")) {
+    return "bg-[#fee2e2] text-[#9a3412]";
+  }
+  if (normalized.includes("recomendable")) {
+    return "bg-[#e6f1ef] text-brand";
+  }
+  return "bg-[#f4e8de] text-[#9a3412]";
+}
+
 type AISettings = {
   gemini_api_key_configured: boolean;
   gemini_api_key_masked: string;
@@ -2029,7 +2040,7 @@ function App() {
                         <span className="rounded-md bg-[#e6f1ef] px-3 py-2 text-sm font-bold text-brand">
                           Score global: {selectedSummary ? `${toPercentInput(selectedSummary.global_score)}%` : "Sin calcular"}
                         </span>
-                        <span className="rounded-md bg-[#f4e8de] px-3 py-2 text-sm font-bold text-[#9a3412]">
+                        <span className={`rounded-md px-3 py-2 text-sm font-bold ${recommendationClass(selectedSummary?.recommendation)}`}>
                           {selectedSummary?.recommendation ?? "Sin recomendación"}
                         </span>
                       </div>
