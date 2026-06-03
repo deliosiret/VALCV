@@ -1654,8 +1654,16 @@ function App() {
                           <strong className="block truncate">{userFullName(row)}</strong>
                           <span className={mutedTextClass}>
                             {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
-                            {row.must_change_password ? " · clave temporal pendiente" : ""}
                             {!row.is_active ? " · inactivo" : ""}
+                          </span>
+                          <span
+                            className={`mt-1 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                              row.must_change_password
+                                ? "bg-[#fff7ed] text-[#9a3412]"
+                                : "bg-[#e6f1ef] text-brand"
+                            }`}
+                          >
+                            {row.must_change_password ? "Clave temporal pendiente" : "Clave registrada"}
                           </span>
                         </div>
                         <label className="relative text-xs font-semibold text-[#25464a]">
@@ -1955,7 +1963,18 @@ function App() {
 
             <div className="grid gap-3 rounded-md border border-[#cfe0df] bg-[#f8fbfa] p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
               <div>
-                <strong className="block text-sm text-[#25464a]">Contraseña</strong>
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <strong className="block text-sm text-[#25464a]">Contraseña</strong>
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                      editingUser.must_change_password
+                        ? "bg-[#fff7ed] text-[#9a3412]"
+                        : "bg-[#e6f1ef] text-brand"
+                    }`}
+                  >
+                    {editingUser.must_change_password ? "Clave temporal pendiente" : "Clave registrada"}
+                  </span>
+                </div>
                 <span className={mutedTextClass}>
                   Se mantiene la clave definida por el usuario. Solo cambia si presionas restablecer.
                   {editingUser.must_change_password ? " Actualmente debe definir una clave propia al iniciar sesión." : ""}
