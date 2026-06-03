@@ -276,13 +276,19 @@ type AILog = {
   response_text: string;
   error: string;
   input_tokens: number;
+  cached_input_tokens: number;
+  billable_input_tokens: number;
+  output_text_tokens: number;
   output_tokens: number;
   thinking_tokens: number;
   total_tokens: number;
   input_cost_usd: number;
+  cache_cost_usd: number;
   output_cost_usd: number;
+  thinking_cost_usd: number;
   total_cost_usd: number;
   pricing_input_usd_per_1m: number;
+  pricing_cache_usd_per_1m: number;
   pricing_output_usd_per_1m: number;
   pricing_source: string;
   pricing_reference_date: string;
@@ -296,9 +302,16 @@ type AILogsResponse = {
   summary: {
     total_interactions: number;
     total_input_tokens: number;
+    total_cached_input_tokens: number;
+    total_billable_input_tokens: number;
+    total_output_text_tokens: number;
     total_output_tokens: number;
     total_thinking_tokens: number;
     total_tokens: number;
+    total_input_cost_usd: number;
+    total_cache_cost_usd: number;
+    total_output_cost_usd: number;
+    total_thinking_cost_usd: number;
     total_cost_usd: number;
   };
   logs: AILog[];
@@ -315,6 +328,7 @@ type User = {
   role: UserRole;
   is_admin: boolean;
   can_view_all: boolean;
+  monthly_ai_quota_usd: number;
   is_active: boolean;
 };
 
@@ -610,7 +624,7 @@ function App() {
   const [user, setUser] = React.useState<User | null>(null);
   const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
   const [users, setUsers] = React.useState<User[]>([]);
-  const [userForm, setUserForm] = React.useState({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole });
+  const [userForm, setUserForm] = React.useState({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5 });
   const [userFormOpen, setUserFormOpen] = React.useState(false);
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
@@ -835,7 +849,7 @@ function App() {
     setBusy(true);
     try {
       await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
-      setUserForm({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" });
+      setUserForm({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator", monthly_ai_quota_usd: 5 });
       setUserFormOpen(false);
       setUsers(await api<User[]>("/users"));
       setNotice("Usuario creado");
@@ -1037,6 +1051,22 @@ function App() {
       setNotice("Reporte generado");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo generar el reporte");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateUserQuota(userId: number, monthly_ai_quota_usd: number) {
+    setBusy(true);
+    try {
+      const updated = await api<User>(`/users/${userId}/ai-quota`, {
+        method: "PATCH",
+        body: JSON.stringify({ monthly_ai_quota_usd }),
+      });
+      setUsers((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      setNotice("Cuota mensual de IA actualizada");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo actualizar la cuota");
     } finally {
       setBusy(false);
     }
@@ -1401,11 +1431,9 @@ function App() {
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy || (!canManageAiSettings && !canManageUsers)} title="Configuración">
             <Settings size={18} />
           </button>
-          {canManageAiSettings ? (
-            <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={openAiLogs} disabled={busy} title="Logs de IA">
-              <ScrollText size={18} />
-            </button>
-          ) : null}
+          <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={openAiLogs} disabled={busy} title="Logs de IA">
+            <ScrollText size={18} />
+          </button>
           <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={logout} disabled={busy} title="Cerrar sesión">
             <LogOut size={18} />
           </button>
@@ -1512,13 +1540,36 @@ function App() {
                   </div>
                   <div className="grid gap-2">
                     {users.map((row) => (
-                      <div className="grid grid-cols-[minmax(0,1fr)_28px] items-center gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm" key={row.id}>
+                      <div className="grid gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm md:grid-cols-[minmax(0,1fr)_150px_28px] md:items-center" key={row.id}>
                         <div className="min-w-0">
                           <strong className="block truncate">{userFullName(row)}</strong>
                           <span className={mutedTextClass}>
                             {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
                           </span>
                         </div>
+                        <label className="relative text-xs font-semibold text-[#25464a]">
+                          <span className="mb-1 block">Cuota IA mensual</span>
+                          {row.is_admin || row.role === "administrator" ? (
+                            <span className="inline-flex min-h-9 w-full items-center rounded-md border border-[#cfe0df] bg-white px-2 text-muted">Sin tope</span>
+                          ) : (
+                            <>
+                              <input
+                                className={`${inputClass} pr-9 text-sm`}
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                value={row.monthly_ai_quota_usd}
+                                onWheel={ignoreNumberWheel}
+                                onChange={(event) => {
+                                  const value = Number(event.target.value) || 0;
+                                  setUsers((current) => current.map((item) => item.id === row.id ? { ...item, monthly_ai_quota_usd: value } : item));
+                                }}
+                                onBlur={(event) => updateUserQuota(row.id, Number(event.target.value) || 0)}
+                              />
+                              <span className="pointer-events-none absolute right-2 top-[1.82rem] text-xs font-bold text-muted">USD</span>
+                            </>
+                          )}
+                        </label>
                         <button
                           className="grid size-7 cursor-pointer place-items-center rounded bg-[#eef6f5] text-[#9a3412] hover:bg-[#e3efed] disabled:cursor-not-allowed disabled:opacity-45"
                           type="button"
@@ -1567,7 +1618,7 @@ function App() {
               </div>
             </div>
 
-            <div className="grid gap-2 border-b border-line bg-[#f8fbfa] p-4 md:grid-cols-4">
+            <div className="grid gap-2 border-b border-line bg-[#f8fbfa] p-4 md:grid-cols-5">
               <div className="rounded-md bg-white p-3 shadow-sm">
                 <span className={mutedTextClass}>Interacciones</span>
                 <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_interactions)}</strong>
@@ -1577,8 +1628,12 @@ function App() {
                 <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_tokens)}</strong>
               </div>
               <div className="rounded-md bg-white p-3 shadow-sm">
-                <span className={mutedTextClass}>Entrada / salida</span>
-                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_input_tokens)} / {formatTokens(aiLogSummary?.total_output_tokens)}</strong>
+                <span className={mutedTextClass}>Entrada facturable / caché</span>
+                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_billable_input_tokens)} / {formatTokens(aiLogSummary?.total_cached_input_tokens)}</strong>
+              </div>
+              <div className="rounded-md bg-white p-3 shadow-sm">
+                <span className={mutedTextClass}>Texto / thinking</span>
+                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_output_text_tokens)} / {formatTokens(aiLogSummary?.total_thinking_tokens)}</strong>
               </div>
               <div className="rounded-md bg-white p-3 shadow-sm">
                 <span className={mutedTextClass}>Costo estimado</span>
@@ -1603,15 +1658,20 @@ function App() {
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs font-semibold">
                           <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatTokens(log.total_tokens)} tokens</span>
-                          <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">in {formatTokens(log.input_tokens)} / out {formatTokens(log.output_tokens)}</span>
+                          <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">in {formatTokens(log.billable_input_tokens)} + cache {formatTokens(log.cached_input_tokens)}</span>
+                          <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">texto {formatTokens(log.output_text_tokens)} · thinking {formatTokens(log.thinking_tokens)}</span>
                           <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatUsd(log.total_cost_usd)}</span>
                         </div>
                       </div>
                     </summary>
                     <div className="mt-3 grid gap-3">
                       <div className="grid gap-2 rounded-md bg-[#f8fbfa] p-3 text-xs md:grid-cols-3">
+                        <span><strong>Entrada:</strong> {formatTokens(log.input_tokens)} total, {formatTokens(log.billable_input_tokens)} facturable, {formatTokens(log.cached_input_tokens)} caché</span>
+                        <span><strong>Salida:</strong> {formatTokens(log.output_text_tokens)} texto, {formatTokens(log.thinking_tokens)} thinking</span>
+                        <span><strong>Costo:</strong> entrada {formatUsd(log.input_cost_usd)}, caché {formatUsd(log.cache_cost_usd)}, salida {formatUsd(log.output_cost_usd)}; thinking incluido {formatUsd(log.thinking_cost_usd)}</span>
                         <span><strong>Precio entrada:</strong> {formatUsd(log.pricing_input_usd_per_1m)} / 1M</span>
-                        <span><strong>Precio salida:</strong> {formatUsd(log.pricing_output_usd_per_1m)} / 1M</span>
+                        <span><strong>Precio caché:</strong> {formatUsd(log.pricing_cache_usd_per_1m)} / 1M</span>
+                        <span><strong>Precio salida/thinking:</strong> {formatUsd(log.pricing_output_usd_per_1m)} / 1M</span>
                         <a className="text-brand underline" href={log.pricing_source} target="_blank" rel="noreferrer">
                           Precios al {log.pricing_reference_date}
                         </a>
@@ -1686,8 +1746,25 @@ function App() {
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
               </select>
+              <label className="relative">
+                <input
+                  className={`${inputClass} pr-10`}
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  placeholder="Cuota IA mensual"
+                  value={userForm.role === "administrator" ? 0 : userForm.monthly_ai_quota_usd}
+                  disabled={userForm.role === "administrator"}
+                  onWheel={ignoreNumberWheel}
+                  onChange={(event) => setUserForm({ ...userForm, monthly_ai_quota_usd: Number(event.target.value) || 0 })}
+                />
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">USD</span>
+              </label>
             </div>
-            <small className={mutedTextClass}>{ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}</small>
+            <small className={mutedTextClass}>
+              {ROLE_OPTIONS.find((role) => role.value === userForm.role)?.description}
+              {userForm.role === "administrator" ? " Los administradores no tienen tope mensual de IA." : " La cuota por defecto es 5 USD mensuales."}
+            </small>
             <div className="flex flex-wrap justify-end gap-2">
               <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setUserFormOpen(false)}>
                 Cancelar

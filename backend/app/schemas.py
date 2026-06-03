@@ -170,13 +170,19 @@ class AIInteractionLogOut(BaseModel):
     response_text: str
     error: str
     input_tokens: int
+    cached_input_tokens: int = 0
+    billable_input_tokens: int = 0
+    output_text_tokens: int = 0
     output_tokens: int
     thinking_tokens: int
     total_tokens: int
     input_cost_usd: float
+    cache_cost_usd: float = 0
     output_cost_usd: float
+    thinking_cost_usd: float = 0
     total_cost_usd: float
     pricing_input_usd_per_1m: float
+    pricing_cache_usd_per_1m: float = 0
     pricing_output_usd_per_1m: float
     pricing_source: str
     pricing_reference_date: str
@@ -192,9 +198,16 @@ class AIInteractionLogOut(BaseModel):
 class AIInteractionLogSummary(BaseModel):
     total_interactions: int
     total_input_tokens: int
+    total_cached_input_tokens: int = 0
+    total_billable_input_tokens: int = 0
+    total_output_text_tokens: int = 0
     total_output_tokens: int
     total_thinking_tokens: int
     total_tokens: int
+    total_input_cost_usd: float = 0
+    total_cache_cost_usd: float = 0
+    total_output_cost_usd: float = 0
+    total_thinking_cost_usd: float = 0
     total_cost_usd: float
 
 
@@ -217,6 +230,11 @@ class UserCreate(BaseModel):
     area: str = ""
     employee_code: str = ""
     role: UserRole = UserRole.evaluator
+    monthly_ai_quota_usd: float = Field(default=5, ge=0)
+
+
+class UserQuotaPatch(BaseModel):
+    monthly_ai_quota_usd: float = Field(default=5, ge=0)
 
 
 class UserOut(BaseModel):
@@ -230,6 +248,7 @@ class UserOut(BaseModel):
     role: UserRole = UserRole.evaluator
     is_admin: bool
     can_view_all: bool
+    monthly_ai_quota_usd: float = 5
     is_active: bool
 
     class Config:

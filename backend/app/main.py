@@ -3,12 +3,13 @@ import secrets
 import shutil
 import uuid
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai import evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
@@ -32,6 +33,7 @@ from app.schemas import (
     TemplateOut,
     TokenOut,
     UserCreate,
+    UserQuotaPatch,
     UserOut,
 )
 from app.scoring import summarize_candidate, upsert_score
@@ -469,6 +471,7 @@ def ensure_schema():
         "area": "VARCHAR(160) NOT NULL DEFAULT ''",
         "employee_code": "VARCHAR(60) NOT NULL DEFAULT ''",
         "role": "user_role NOT NULL DEFAULT 'evaluator'",
+        "monthly_ai_quota_usd": "DOUBLE PRECISION NOT NULL DEFAULT 5",
     }
     for column_name, definition in user_column_defaults.items():
         if column_name not in user_columns:
@@ -477,6 +480,31 @@ def ensure_schema():
     with engine.begin() as connection:
         connection.execute(text("UPDATE users SET role = 'administrator' WHERE is_admin = TRUE"))
         connection.execute(text("UPDATE users SET role = 'viewer' WHERE is_admin = FALSE AND can_view_all = TRUE AND role = 'evaluator'"))
+        connection.execute(text("UPDATE users SET monthly_ai_quota_usd = 0 WHERE is_admin = TRUE OR role = 'administrator'"))
+    if inspector.has_table("ai_interaction_logs"):
+        ai_log_columns = {column["name"] for column in inspector.get_columns("ai_interaction_logs")}
+        ai_log_column_defaults = {
+            "cached_input_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "billable_input_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "output_text_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "cache_cost_usd": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+            "thinking_cost_usd": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+            "pricing_cache_usd_per_1m": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+        }
+        for column_name, definition in ai_log_column_defaults.items():
+            if column_name not in ai_log_columns:
+                with engine.begin() as connection:
+                    connection.execute(text(f"ALTER TABLE ai_interaction_logs ADD COLUMN {column_name} {definition}"))
+        with engine.begin() as connection:
+            connection.execute(text("UPDATE ai_interaction_logs SET billable_input_tokens = input_tokens WHERE billable_input_tokens = 0 AND cached_input_tokens = 0"))
+            connection.execute(text("UPDATE ai_interaction_logs SET output_text_tokens = GREATEST(output_tokens - thinking_tokens, 0) WHERE output_text_tokens = 0"))
+            connection.execute(
+                text(
+                    "UPDATE ai_interaction_logs "
+                    "SET thinking_cost_usd = thinking_tokens * pricing_output_usd_per_1m / 1000000 "
+                    "WHERE thinking_cost_usd = 0 AND thinking_tokens > 0"
+                )
+            )
 
 
 def get_template_or_404(db: Session, template_id: int) -> Template:
@@ -547,6 +575,35 @@ def get_ai_config(db: Session) -> tuple[str | None, str]:
     return api_key or None, model or settings.gemini_model
 
 
+def month_start() -> datetime:
+    now = datetime.utcnow()
+    return datetime(now.year, now.month, 1)
+
+
+def monthly_ai_usage_usd(db: Session, user: User) -> float:
+    if not user.id:
+        return 0.0
+    return float(
+        db.query(AIInteractionLog)
+        .filter(AIInteractionLog.user_id == user.id, AIInteractionLog.created_at >= month_start())
+        .with_entities(func.coalesce(func.sum(AIInteractionLog.total_cost_usd), 0))
+        .scalar()
+        or 0
+    )
+
+
+def enforce_ai_quota(db: Session, user: User):
+    if user.is_admin or user.role == UserRole.administrator:
+        return
+    quota = float(user.monthly_ai_quota_usd or 0)
+    used = monthly_ai_usage_usd(db, user)
+    if used >= quota:
+        raise HTTPException(
+            status_code=403,
+            detail=f"El usuario alcanzó su cuota mensual de IA: {used:.4f} USD de {quota:.2f} USD.",
+        )
+
+
 def record_ai_interaction(
     db: Session,
     action: str,
@@ -564,13 +621,19 @@ def record_ai_interaction(
             prompt_text=result.prompt_text,
             response_text=result.response_text,
             input_tokens=result.input_tokens,
+            cached_input_tokens=result.cached_input_tokens,
+            billable_input_tokens=result.billable_input_tokens,
+            output_text_tokens=result.output_text_tokens,
             output_tokens=result.output_tokens,
             thinking_tokens=result.thinking_tokens,
             total_tokens=result.total_tokens,
             input_cost_usd=result.input_cost_usd,
+            cache_cost_usd=result.cache_cost_usd,
             output_cost_usd=result.output_cost_usd,
+            thinking_cost_usd=result.thinking_cost_usd,
             total_cost_usd=result.total_cost_usd,
             pricing_input_usd_per_1m=result.pricing_input_usd_per_1m,
+            pricing_cache_usd_per_1m=result.pricing_cache_usd_per_1m,
             pricing_output_usd_per_1m=result.pricing_output_usd_per_1m,
             pricing_source=result.pricing_source,
             pricing_reference_date=result.pricing_reference_date,
@@ -636,9 +699,24 @@ def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Sessi
         role=payload.role,
         is_admin=payload.role == UserRole.administrator,
         can_view_all="view_results" in ROLE_PERMISSIONS.get(payload.role, set()),
+        monthly_ai_quota_usd=0 if payload.role == UserRole.administrator else payload.monthly_ai_quota_usd,
         is_active=True,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.patch("/users/{user_id}/ai-quota", response_model=UserOut)
+def update_user_ai_quota(user_id: int, payload: UserQuotaPatch, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if user.is_admin or user.role == UserRole.administrator:
+        user.monthly_ai_quota_usd = 0
+    else:
+        user.monthly_ai_quota_usd = payload.monthly_ai_quota_usd
     db.commit()
     db.refresh(user)
     return user
@@ -692,18 +770,28 @@ def list_ai_models(_: User = Depends(get_current_user)):
 
 @app.get("/settings/ai/logs", response_model=AIInteractionLogsOut)
 def list_ai_logs(
-    _: User = Depends(require_permission("manage_ai_settings")),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=80, ge=1, le=300),
 ):
-    logs = db.query(AIInteractionLog).order_by(AIInteractionLog.created_at.desc(), AIInteractionLog.id.desc()).limit(limit).all()
-    all_logs = db.query(AIInteractionLog).all()
+    query = db.query(AIInteractionLog)
+    if not (user.is_admin or user.role == UserRole.administrator):
+        query = query.filter(AIInteractionLog.user_id == user.id)
+    logs = query.order_by(AIInteractionLog.created_at.desc(), AIInteractionLog.id.desc()).limit(limit).all()
+    all_logs = query.all()
     summary = {
         "total_interactions": len(all_logs),
         "total_input_tokens": sum(row.input_tokens or 0 for row in all_logs),
+        "total_cached_input_tokens": sum(row.cached_input_tokens or 0 for row in all_logs),
+        "total_billable_input_tokens": sum(row.billable_input_tokens or 0 for row in all_logs),
+        "total_output_text_tokens": sum(row.output_text_tokens or 0 for row in all_logs),
         "total_output_tokens": sum(row.output_tokens or 0 for row in all_logs),
         "total_thinking_tokens": sum(row.thinking_tokens or 0 for row in all_logs),
         "total_tokens": sum(row.total_tokens or 0 for row in all_logs),
+        "total_input_cost_usd": sum(row.input_cost_usd or 0 for row in all_logs),
+        "total_cache_cost_usd": sum(row.cache_cost_usd or 0 for row in all_logs),
+        "total_output_cost_usd": sum(row.output_cost_usd or 0 for row in all_logs),
+        "total_thinking_cost_usd": sum(row.thinking_cost_usd or 0 for row in all_logs),
         "total_cost_usd": sum(row.total_cost_usd or 0 for row in all_logs),
     }
     return {"summary": summary, "logs": logs}
@@ -761,6 +849,7 @@ async def generate_template_ai(
         file_bytes = await requirements_file.read()
         file_name = requirements_file.filename
     try:
+        enforce_ai_quota(db, user)
         api_key, model = get_ai_config(db)
         result = generate_template_with_gemini(requirements_text, file_name, file_bytes, file_mime_type, api_key, model)
         record_ai_interaction(db, "generate_template", model, result, user=user)
@@ -1017,6 +1106,7 @@ def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("eval
     if not automatic_criteria:
         raise HTTPException(status_code=400, detail="La plantilla no tiene criterios automáticos.")
     try:
+        enforce_ai_quota(db, user)
         api_key, model = get_ai_config(db)
         evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
         record_ai_interaction(db, "evaluate_candidate", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)
@@ -1038,6 +1128,7 @@ def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("eval
     db.flush()
     refreshed_candidate = get_candidate_or_404(db, candidate_id)
     try:
+        enforce_ai_quota(db, user)
         bonus_result = evaluate_candidate_bonus_with_gemini(
             refreshed_candidate,
             list(template.criteria),
@@ -1068,6 +1159,7 @@ def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, user: Use
         raise HTTPException(status_code=400, detail="Este criterio no está configurado para evaluación con IA.")
     automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
     try:
+        enforce_ai_quota(db, user)
         api_key, model = get_ai_config(db)
         evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
         record_ai_interaction(db, "reevaluate_criterion", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)

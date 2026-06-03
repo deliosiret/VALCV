@@ -27,13 +27,13 @@ Reglas institucionales de evaluación:
 GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
 GEMINI_PRICING_REFERENCE_DATE = "2026-06-03"
 GEMINI_STANDARD_PRICING_USD_PER_1M = {
-    "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
-    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
-    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00},
-    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
-    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
-    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cache": 0.15},
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50, "cache": 0.025},
+    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00, "cache": 0.20},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00, "cache": 0.05},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00, "cache": 0.125},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache": 0.03},
+    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "cache": 0.01},
 }
 
 
@@ -43,52 +43,68 @@ class GeminiCallResult:
     prompt_text: str
     response_text: str
     input_tokens: int
+    cached_input_tokens: int
+    billable_input_tokens: int
+    output_text_tokens: int
     output_tokens: int
     thinking_tokens: int
     total_tokens: int
     input_cost_usd: float
+    cache_cost_usd: float
     output_cost_usd: float
+    thinking_cost_usd: float
     total_cost_usd: float
     pricing_input_usd_per_1m: float
+    pricing_cache_usd_per_1m: float
     pricing_output_usd_per_1m: float
     pricing_source: str = GEMINI_PRICING_SOURCE
     pricing_reference_date: str = GEMINI_PRICING_REFERENCE_DATE
 
 
 def model_pricing(model: str) -> dict[str, float]:
-    return GEMINI_STANDARD_PRICING_USD_PER_1M.get(model, {"input": 0.0, "output": 0.0})
+    return GEMINI_STANDARD_PRICING_USD_PER_1M.get(model, {"input": 0.0, "output": 0.0, "cache": 0.0})
 
 
-def response_token_usage(response) -> tuple[int, int, int, int]:
+def response_token_usage(response) -> tuple[int, int, int, int, int, int]:
     usage = getattr(response, "usage_metadata", None)
     input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+    cached_input_tokens = int(getattr(usage, "cached_content_token_count", 0) or 0)
     candidates_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
     thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
     total_tokens = int(getattr(usage, "total_token_count", input_tokens + candidates_tokens + thinking_tokens) or 0)
     output_tokens = candidates_tokens + thinking_tokens
     if output_tokens == 0 and total_tokens > input_tokens:
         output_tokens = total_tokens - input_tokens
-    return input_tokens, output_tokens, thinking_tokens, total_tokens
+    billable_input_tokens = max(input_tokens - cached_input_tokens, 0)
+    return input_tokens, cached_input_tokens, billable_input_tokens, candidates_tokens, output_tokens, thinking_tokens, total_tokens
 
 
 def gemini_result(model: str, prompt_text: str, response) -> GeminiCallResult:
     response_text = response.text or "{}"
-    input_tokens, output_tokens, thinking_tokens, total_tokens = response_token_usage(response)
+    input_tokens, cached_input_tokens, billable_input_tokens, output_text_tokens, output_tokens, thinking_tokens, total_tokens = response_token_usage(response)
     pricing = model_pricing(model)
-    input_cost = input_tokens * pricing["input"] / 1_000_000
+    input_cost = billable_input_tokens * pricing["input"] / 1_000_000
+    cache_cost = cached_input_tokens * pricing["cache"] / 1_000_000
     output_cost = output_tokens * pricing["output"] / 1_000_000
+    thinking_cost = thinking_tokens * pricing["output"] / 1_000_000
     return GeminiCallResult(
         payload=_extract_json(response_text),
         prompt_text=prompt_text,
         response_text=response_text,
         input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        billable_input_tokens=billable_input_tokens,
+        output_text_tokens=output_text_tokens,
         output_tokens=output_tokens,
         thinking_tokens=thinking_tokens,
         total_tokens=total_tokens,
         input_cost_usd=input_cost,
+        cache_cost_usd=cache_cost,
         output_cost_usd=output_cost,
-        total_cost_usd=input_cost + output_cost,
+        thinking_cost_usd=thinking_cost,
+        total_cost_usd=input_cost + cache_cost + output_cost,
         pricing_input_usd_per_1m=pricing["input"],
+        pricing_cache_usd_per_1m=pricing["cache"],
         pricing_output_usd_per_1m=pricing["output"],
     )
 
