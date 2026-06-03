@@ -166,6 +166,7 @@ class AIInteractionLogOut(BaseModel):
     action: str
     model: str
     status: str
+    cached_content_name: str = ""
     prompt_text: str
     response_text: str
     error: str

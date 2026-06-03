@@ -192,6 +192,7 @@ class AIInteractionLog(Base):
     action: Mapped[str] = mapped_column(String(80), index=True)
     model: Mapped[str] = mapped_column(String(120), index=True)
     status: Mapped[str] = mapped_column(String(24), default="success")
+    cached_content_name: Mapped[str] = mapped_column(String(220), default="")
     prompt_text: Mapped[str] = mapped_column(Text, default="")
     response_text: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="")
@@ -220,3 +221,17 @@ class AIInteractionLog(Base):
     user: Mapped[User | None] = relationship()
     candidate: Mapped[Candidate | None] = relationship()
     template: Mapped[Template | None] = relationship()
+
+
+class AICandidateCache(Base):
+    __tablename__ = "ai_candidate_caches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(120), index=True)
+    document_signature: Mapped[str] = mapped_column(String(80), index=True)
+    cache_name: Mapped[str] = mapped_column(String(220), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    candidate: Mapped[Candidate] = relationship()

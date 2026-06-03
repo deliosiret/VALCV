@@ -3,7 +3,7 @@ import secrets
 import shutil
 import uuid
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
@@ -12,10 +12,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai import evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
+from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
+from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
 from app.reports import build_candidate_report
 from app.schemas import (
     AISettingsIn,
@@ -484,6 +484,7 @@ def ensure_schema():
     if inspector.has_table("ai_interaction_logs"):
         ai_log_columns = {column["name"] for column in inspector.get_columns("ai_interaction_logs")}
         ai_log_column_defaults = {
+            "cached_content_name": "VARCHAR(220) NOT NULL DEFAULT ''",
             "cached_input_tokens": "INTEGER NOT NULL DEFAULT 0",
             "billable_input_tokens": "INTEGER NOT NULL DEFAULT 0",
             "output_text_tokens": "INTEGER NOT NULL DEFAULT 0",
@@ -604,6 +605,40 @@ def enforce_ai_quota(db: Session, user: User):
         )
 
 
+def get_or_create_candidate_cache(db: Session, candidate: Candidate, api_key: str | None, model: str) -> str:
+    signature = candidate_document_signature(candidate)
+    now = datetime.utcnow()
+    current = (
+        db.query(AICandidateCache)
+        .filter(
+            AICandidateCache.candidate_id == candidate.id,
+            AICandidateCache.model == model,
+            AICandidateCache.document_signature == signature,
+            AICandidateCache.expires_at > now,
+        )
+        .order_by(AICandidateCache.expires_at.desc())
+        .first()
+    )
+    if current:
+        return current.cache_name
+    try:
+        cache_name = create_candidate_context_cache(candidate, settings.upload_dir, api_key, model)
+    except Exception:
+        return ""
+    expires_at = now + timedelta(hours=1)
+    db.add(
+        AICandidateCache(
+            candidate_id=candidate.id,
+            model=model,
+            document_signature=signature,
+            cache_name=cache_name,
+            expires_at=expires_at,
+        )
+    )
+    db.flush()
+    return cache_name
+
+
 def record_ai_interaction(
     db: Session,
     action: str,
@@ -618,6 +653,7 @@ def record_ai_interaction(
             action=action,
             model=model,
             status="success",
+            cached_content_name=result.cached_content_name,
             prompt_text=result.prompt_text,
             response_text=result.response_text,
             input_tokens=result.input_tokens,
@@ -1108,7 +1144,8 @@ def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("eval
     try:
         enforce_ai_quota(db, user)
         api_key, model = get_ai_config(db)
-        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        cached_content_name = get_or_create_candidate_cache(db, candidate, api_key, model)
+        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model, cached_content_name)
         record_ai_interaction(db, "evaluate_candidate", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)
         results = evaluation_result.payload.get("scores", [])
     except Exception as exc:
@@ -1129,6 +1166,7 @@ def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("eval
     refreshed_candidate = get_candidate_or_404(db, candidate_id)
     try:
         enforce_ai_quota(db, user)
+        cached_content_name = get_or_create_candidate_cache(db, refreshed_candidate, api_key, model)
         bonus_result = evaluate_candidate_bonus_with_gemini(
             refreshed_candidate,
             list(template.criteria),
@@ -1136,6 +1174,7 @@ def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("eval
             settings.upload_dir,
             api_key,
             model,
+            cached_content_name,
         )
         record_ai_interaction(db, "evaluate_bonus", model, bonus_result, user=user, candidate_id=candidate.id, template_id=template.id)
         bonus = bonus_result.payload
@@ -1161,7 +1200,8 @@ def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, user: Use
     try:
         enforce_ai_quota(db, user)
         api_key, model = get_ai_config(db)
-        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        cached_content_name = get_or_create_candidate_cache(db, candidate, api_key, model)
+        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model, cached_content_name)
         record_ai_interaction(db, "reevaluate_criterion", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)
         results = evaluation_result.payload.get("scores", [])
     except Exception as exc:

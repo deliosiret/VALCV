@@ -272,6 +272,7 @@ type AILog = {
   action: string;
   model: string;
   status: string;
+  cached_content_name: string;
   prompt_text: string;
   response_text: string;
   error: string;
@@ -1660,6 +1661,7 @@ function App() {
                           <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatTokens(log.total_tokens)} tokens</span>
                           <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">in {formatTokens(log.billable_input_tokens)} + cache {formatTokens(log.cached_input_tokens)}</span>
                           <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">texto {formatTokens(log.output_text_tokens)} · thinking {formatTokens(log.thinking_tokens)}</span>
+                          {log.cached_content_name ? <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">cache explícito</span> : null}
                           <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatUsd(log.total_cost_usd)}</span>
                         </div>
                       </div>
@@ -1672,6 +1674,7 @@ function App() {
                         <span><strong>Precio entrada:</strong> {formatUsd(log.pricing_input_usd_per_1m)} / 1M</span>
                         <span><strong>Precio caché:</strong> {formatUsd(log.pricing_cache_usd_per_1m)} / 1M</span>
                         <span><strong>Precio salida/thinking:</strong> {formatUsd(log.pricing_output_usd_per_1m)} / 1M</span>
+                        <span><strong>Cache usado:</strong> {log.cached_content_name || "No"}</span>
                         <a className="text-brand underline" href={log.pricing_source} target="_blank" rel="noreferrer">
                           Precios al {log.pricing_reference_date}
                         </a>

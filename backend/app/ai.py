@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ Reglas institucionales de evaluación:
 - Para formación, prioriza relevancia regulatoria, eléctrica, energética y de mercados eléctricos sobre formación genérica de otros sectores.
 - Si la evidencia es ambigua, incompleta o no verificable en los documentos, asigna una puntuación conservadora y explícalo.
 """.strip()
+SUPPORTED_DOCUMENT_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
 
 
 GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
@@ -57,6 +59,7 @@ class GeminiCallResult:
     pricing_input_usd_per_1m: float
     pricing_cache_usd_per_1m: float
     pricing_output_usd_per_1m: float
+    cached_content_name: str = ""
     pricing_source: str = GEMINI_PRICING_SOURCE
     pricing_reference_date: str = GEMINI_PRICING_REFERENCE_DATE
 
@@ -79,7 +82,7 @@ def response_token_usage(response) -> tuple[int, int, int, int, int, int]:
     return input_tokens, cached_input_tokens, billable_input_tokens, candidates_tokens, output_tokens, thinking_tokens, total_tokens
 
 
-def gemini_result(model: str, prompt_text: str, response) -> GeminiCallResult:
+def gemini_result(model: str, prompt_text: str, response, cached_content_name: str = "") -> GeminiCallResult:
     response_text = response.text or "{}"
     input_tokens, cached_input_tokens, billable_input_tokens, output_text_tokens, output_tokens, thinking_tokens, total_tokens = response_token_usage(response)
     pricing = model_pricing(model)
@@ -106,6 +109,7 @@ def gemini_result(model: str, prompt_text: str, response) -> GeminiCallResult:
         pricing_input_usd_per_1m=pricing["input"],
         pricing_cache_usd_per_1m=pricing["cache"],
         pricing_output_usd_per_1m=pricing["output"],
+        cached_content_name=cached_content_name,
     )
 
 
@@ -121,17 +125,30 @@ def _extract_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
-def generate_config(model: str) -> types.GenerateContentConfig:
+def generate_config(model: str, cached_content_name: str | None = None) -> types.GenerateContentConfig:
     model_name = model.lower()
     thinking_config = None
     if model_name.startswith("gemini-3"):
         thinking_config = types.ThinkingConfig(thinking_level="low")
     elif model_name.startswith(("gemini-2.5-flash", "gemini-2.5-flash-lite")):
         thinking_config = types.ThinkingConfig(thinking_budget=0)
-    return types.GenerateContentConfig(
-        response_mime_type="application/json",
-        thinking_config=thinking_config,
+    config = {
+        "response_mime_type": "application/json",
+        "thinking_config": thinking_config,
+    }
+    if cached_content_name:
+        config["cached_content"] = cached_content_name
+    return types.GenerateContentConfig(**config)
+
+
+def candidate_document_signature(candidate: Candidate) -> str:
+    source = "|".join(
+        f"{file.id}:{file.stored_name}:{file.size_bytes}:{file.created_at.isoformat() if file.created_at else ''}"
+        for file in sorted(candidate.files, key=lambda item: item.id)
     )
+    import hashlib
+
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
 def candidate_document_parts(candidate: Candidate, upload_dir: str) -> list:
@@ -139,11 +156,64 @@ def candidate_document_parts(candidate: Candidate, upload_dir: str) -> list:
     for file in candidate.files:
         path = Path(upload_dir) / file.stored_name
         mime_type = file.mime_type or mimetypes.guess_type(file.original_name)[0] or "application/octet-stream"
-        if mime_type not in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}:
+        if mime_type not in SUPPORTED_DOCUMENT_MIME_TYPES:
             continue
         parts.append(types.Part.from_text(text=f"Documento disponible: id={file.id}, nombre={file.original_name}"))
         parts.append(types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type))
     return parts
+
+
+def create_candidate_context_cache(
+    candidate: Candidate,
+    upload_dir: str,
+    api_key: str | None,
+    model: str,
+    ttl_seconds: int = 3600,
+) -> str:
+    if not api_key:
+        raise RuntimeError("Configura la API key de Gemini antes de crear caché de IA.")
+    client = genai.Client(api_key=api_key)
+    parts: list = [
+        types.Part.from_text(
+            text=(
+                "Expediente documental cacheado para evaluación curricular. "
+                "Usa estos documentos como fuente de evidencia. Mapa de documentos: "
+                + json.dumps(
+                    [{"id": file.id, "name": file.original_name, "mime_type": file.mime_type} for file in candidate.files],
+                    ensure_ascii=False,
+                )
+            )
+        )
+    ]
+    for file in candidate.files:
+        path = Path(upload_dir) / file.stored_name
+        mime_type = file.mime_type or mimetypes.guess_type(file.original_name)[0] or "application/octet-stream"
+        if mime_type not in SUPPORTED_DOCUMENT_MIME_TYPES or not path.exists():
+            continue
+        uploaded = client.files.upload(
+            file=path,
+            config=types.UploadFileConfig(mime_type=mime_type, display_name=f"{file.id}-{file.original_name}"),
+        )
+        deadline = time.time() + 45
+        while getattr(getattr(uploaded, "state", None), "name", "") == "PROCESSING" and time.time() < deadline:
+            time.sleep(2)
+            uploaded = client.files.get(name=uploaded.name)
+        parts.append(types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type))
+    if len(parts) == 1:
+        raise RuntimeError("No hay documentos compatibles para crear caché de IA.")
+    cache = client.caches.create(
+        model=model,
+        config=types.CreateCachedContentConfig(
+            display_name=f"valcv-candidate-{candidate.id}",
+            system_instruction=(
+                "Eres un asistente de evaluación curricular. Usa el expediente documental cacheado como evidencia. "
+                "Cuando se soliciten file_ids, responde con los ids del mapa de documentos incluido en el cache."
+            ),
+            contents=[types.Content(role="user", parts=parts)],
+            ttl=f"{ttl_seconds}s",
+        ),
+    )
+    return cache.name
 
 
 def evaluate_candidate_with_gemini(
@@ -152,6 +222,7 @@ def evaluate_candidate_with_gemini(
     upload_dir: str,
     api_key: str | None,
     model: str,
+    cached_content_name: str | None = None,
 ) -> GeminiCallResult:
     if not api_key:
         raise RuntimeError("Configura la API key de Gemini antes de evaluar con IA.")
@@ -185,15 +256,23 @@ def evaluate_candidate_with_gemini(
         f"Candidato: {candidate.name}. Criterios automáticos: {json.dumps(rubric, ensure_ascii=False)}"
     )
 
-    parts: list = [types.Part.from_text(text=prompt), *candidate_document_parts(candidate, upload_dir)]
+    if cached_content_name:
+        prompt = (
+            "Usa el expediente documental cacheado asociado a esta solicitud. "
+            "Devuelve file_ids usando el mapa de documentos cacheado. "
+            + prompt
+        )
+    parts: list = [types.Part.from_text(text=prompt)]
+    if not cached_content_name:
+        parts.extend(candidate_document_parts(candidate, upload_dir))
 
     contents = [types.Content(role="user", parts=parts)]
     response = client.models.generate_content(
         model=model,
         contents=contents,
-        config=generate_config(model),
+        config=generate_config(model, cached_content_name),
     )
-    return gemini_result(model, prompt, response)
+    return gemini_result(model, prompt, response, cached_content_name or "")
 
 
 def evaluate_candidate_bonus_with_gemini(
@@ -203,6 +282,7 @@ def evaluate_candidate_bonus_with_gemini(
     upload_dir: str,
     api_key: str | None,
     model: str,
+    cached_content_name: str | None = None,
 ) -> GeminiCallResult:
     if not api_key:
         raise RuntimeError("Configura la API key de Gemini antes de evaluar con IA.")
@@ -235,13 +315,17 @@ def evaluate_candidate_bonus_with_gemini(
         f"Evaluación ya registrada: {json.dumps(evaluation_snapshot, ensure_ascii=False)}"
     )
     client = genai.Client(api_key=api_key)
-    parts: list = [types.Part.from_text(text=prompt), *candidate_document_parts(candidate, upload_dir)]
+    if cached_content_name:
+        prompt = "Usa el expediente documental cacheado asociado a esta solicitud. " + prompt
+    parts: list = [types.Part.from_text(text=prompt)]
+    if not cached_content_name:
+        parts.extend(candidate_document_parts(candidate, upload_dir))
     response = client.models.generate_content(
         model=model,
         contents=[types.Content(role="user", parts=parts)],
-        config=generate_config(model),
+        config=generate_config(model, cached_content_name),
     )
-    return gemini_result(model, prompt, response)
+    return gemini_result(model, prompt, response, cached_content_name or "")
 
 
 def generate_template_with_gemini(
