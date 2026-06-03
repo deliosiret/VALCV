@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   BarChart3,
   Bot,
+  Check,
   Copy,
   FilePenLine,
   FileText,
@@ -2193,26 +2194,38 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                    <div className="mb-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                       <div>
                         <strong className="text-sm text-[#25464a]">Decisión del evaluador</strong>
                         <span className={mutedTextClass}>Decisión humana final: {decisionLabel(selectedCandidate.final_decision)}</span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="inline-grid grid-cols-2 overflow-hidden rounded-lg border border-[#cfe0df] bg-[#f8fbfa] p-1 shadow-inner shadow-[#16697a]/5">
                         <button
-                          className={`${buttonClass} ${selectedCandidate.final_decision === "qualifies" ? "bg-[#16697a]" : "bg-[#486366]"}`}
+                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-extrabold transition ${
+                            selectedCandidate.final_decision === "qualifies"
+                              ? "bg-[#16697a] text-white shadow-md shadow-[#16697a]/25"
+                              : "bg-transparent text-[#486366] hover:bg-[#e6f1ef]"
+                          } disabled:cursor-wait disabled:opacity-55`}
                           type="button"
                           disabled={busy || !canEvaluateCandidates}
                           onClick={() => setCandidateDecision("qualifies")}
+                          aria-pressed={selectedCandidate.final_decision === "qualifies"}
                         >
+                          <Check size={17} strokeWidth={3} />
                           Califica
                         </button>
                         <button
-                          className={`${buttonClass} ${selectedCandidate.final_decision === "not_qualifies" ? "bg-[#9a3412]" : "bg-[#486366]"}`}
+                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-extrabold transition ${
+                            selectedCandidate.final_decision === "not_qualifies"
+                              ? "bg-[#9a3412] text-white shadow-md shadow-[#9a3412]/20"
+                              : "bg-transparent text-[#486366] hover:bg-[#fee2e2]"
+                          } disabled:cursor-wait disabled:opacity-55`}
                           type="button"
                           disabled={busy || !canEvaluateCandidates}
                           onClick={() => setCandidateDecision("not_qualifies")}
+                          aria-pressed={selectedCandidate.final_decision === "not_qualifies"}
                         >
+                          <X size={17} strokeWidth={3} />
                           No califica
                         </button>
                       </div>
