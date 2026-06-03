@@ -36,6 +36,7 @@ from app.schemas import (
     UserCreate,
     UserQuotaPatch,
     UserOut,
+    UserUpdate,
 )
 from app.scoring import summarize_candidate, upsert_score
 from app.seed import seed_initial_template
@@ -786,6 +787,52 @@ def update_user_ai_quota(user_id: int, payload: UserQuotaPatch, _: User = Depend
         user.monthly_ai_quota_usd = 0
     else:
         user.monthly_ai_quota_usd = payload.monthly_ai_quota_usd
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.put("/users/{user_id}", response_model=UserOut)
+def update_user(user_id: int, payload: UserUpdate, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Usuario requerido.")
+    if db.query(User).filter(User.username == username, User.id != user_id).first():
+        raise HTTPException(status_code=400, detail="Ya existe un usuario con ese nombre.")
+    will_be_admin = payload.role == UserRole.administrator
+    will_be_active = payload.is_active
+    if user_id == current_user.id and not will_be_active:
+        raise HTTPException(status_code=400, detail="No puedes desactivar tu propio usuario activo.")
+    if user.is_admin and (not will_be_admin or not will_be_active):
+        other_active_admins = db.query(User).filter(User.is_admin == True, User.is_active == True, User.id != user_id).count()
+        if other_active_admins == 0:
+            raise HTTPException(status_code=400, detail="Debe quedar al menos un administrador activo.")
+    user.username = username
+    user.first_name = payload.first_name.strip()
+    user.last_name = payload.last_name.strip()
+    user.position = payload.position.strip()
+    user.area = payload.area.strip()
+    user.employee_code = payload.employee_code.strip()
+    user.role = payload.role
+    user.is_admin = will_be_admin
+    user.can_view_all = "view_results" in ROLE_PERMISSIONS.get(payload.role, set())
+    user.monthly_ai_quota_usd = 0 if will_be_admin else payload.monthly_ai_quota_usd
+    user.is_active = will_be_active
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/users/{user_id}/reset-password", response_model=UserOut)
+def reset_user_password(user_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    user.password_hash = hash_password(TEMPORARY_PASSWORD)
+    user.must_change_password = True
     db.commit()
     db.refresh(user)
     return user

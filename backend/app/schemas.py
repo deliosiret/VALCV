@@ -238,6 +238,18 @@ class UserCreate(BaseModel):
     monthly_ai_quota_usd: float = Field(default=5, ge=0)
 
 
+class UserUpdate(BaseModel):
+    username: str
+    first_name: str = ""
+    last_name: str = ""
+    position: str = ""
+    area: str = ""
+    employee_code: str = ""
+    role: UserRole = UserRole.evaluator
+    monthly_ai_quota_usd: float = Field(default=5, ge=0)
+    is_active: bool = True
+
+
 class UserQuotaPatch(BaseModel):
     monthly_ai_quota_usd: float = Field(default=5, ge=0)
 

@@ -9,6 +9,7 @@ import {
   FileText,
   FileUp,
   Gauge,
+  KeyRound,
   LogOut,
   Plus,
   RefreshCw,
@@ -629,6 +630,8 @@ function App() {
   const [users, setUsers] = React.useState<User[]>([]);
   const [userForm, setUserForm] = React.useState({ username: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5 });
   const [userFormOpen, setUserFormOpen] = React.useState(false);
+  const [editingUser, setEditingUser] = React.useState<User | null>(null);
+  const [userEditForm, setUserEditForm] = React.useState({ username: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5, is_active: true });
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [summary, setSummary] = React.useState<SummaryCandidate[]>([]);
@@ -882,6 +885,57 @@ function App() {
       setNotice("Usuario creado");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo crear el usuario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openUserEditor(row: User) {
+    setEditingUser(row);
+    setUserEditForm({
+      username: row.username,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      position: row.position,
+      area: row.area,
+      employee_code: row.employee_code,
+      role: row.role,
+      monthly_ai_quota_usd: row.monthly_ai_quota_usd,
+      is_active: row.is_active,
+    });
+  }
+
+  async function saveUserEdit() {
+    if (!editingUser) return;
+    setBusy(true);
+    try {
+      const updated = await api<User>(`/users/${editingUser.id}`, {
+        method: "PUT",
+        body: JSON.stringify(userEditForm),
+      });
+      setUsers((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      if (user?.id === updated.id) setUser(updated);
+      setEditingUser(null);
+      setNotice("Usuario actualizado");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo actualizar el usuario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetUserPassword(userId: number) {
+    const row = users.find((candidateUser) => candidateUser.id === userId) ?? editingUser;
+    if (!row || !window.confirm(`¿Restablecer la clave de ${userFullName(row)} a temporal123?`)) return;
+    setBusy(true);
+    try {
+      const updated = await api<User>(`/users/${userId}/reset-password`, { method: "POST" });
+      setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (user?.id === updated.id) setUser(updated);
+      setEditingUser(updated);
+      setNotice("Clave restablecida a temporal123");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo restablecer la clave");
     } finally {
       setBusy(false);
     }
@@ -1595,11 +1649,13 @@ function App() {
                   </div>
                   <div className="grid gap-2">
                     {users.map((row) => (
-                      <div className="grid gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm md:grid-cols-[minmax(0,1fr)_150px_28px] md:items-center" key={row.id}>
+                      <div className="grid gap-2 rounded-md bg-[#f8fbfa] px-2 py-1.5 text-sm md:grid-cols-[minmax(0,1fr)_150px_28px_28px] md:items-center" key={row.id}>
                         <div className="min-w-0">
                           <strong className="block truncate">{userFullName(row)}</strong>
                           <span className={mutedTextClass}>
                             {row.username} · {roleLabel(row.role)}{row.position ? ` · ${row.position}` : ""}{row.area ? ` · ${row.area}` : ""}
+                            {row.must_change_password ? " · clave temporal pendiente" : ""}
+                            {!row.is_active ? " · inactivo" : ""}
                           </span>
                         </div>
                         <label className="relative text-xs font-semibold text-[#25464a]">
@@ -1625,6 +1681,15 @@ function App() {
                             </>
                           )}
                         </label>
+                        <button
+                          className="grid size-7 cursor-pointer place-items-center rounded bg-[#eef6f5] text-brand hover:bg-[#e3efed] disabled:cursor-not-allowed disabled:opacity-45"
+                          type="button"
+                          onClick={() => openUserEditor(row)}
+                          disabled={busy}
+                          title="Editar usuario"
+                        >
+                          <FilePenLine size={14} />
+                        </button>
                         <button
                           className="grid size-7 cursor-pointer place-items-center rounded bg-[#eef6f5] text-[#9a3412] hover:bg-[#e3efed] disabled:cursor-not-allowed disabled:opacity-45"
                           type="button"
@@ -1820,6 +1885,102 @@ function App() {
               </button>
               <button className={buttonClass} type="button" onClick={createUser} disabled={busy}>
                 <Plus size={18} /> Crear usuario
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingUser ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-3">
+          <div className="grid max-h-[92vh] w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-line bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
+              <div>
+                <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+                  <FilePenLine size={18} /> Editar usuario
+                </h2>
+                <p className="text-sm text-muted">Actualiza los datos institucionales y permisos sin cambiar la clave definida por el usuario.</p>
+              </div>
+              <button className={`${buttonClass} bg-[#486366] px-2`} type="button" onClick={() => setEditingUser(null)} title="Cerrar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              <input
+                className={inputClass}
+                name="valcv-edit-user-login"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Usuario"
+                value={userEditForm.username}
+                onChange={(event) => setUserEditForm({ ...userEditForm, username: event.target.value })}
+              />
+              <label className="flex min-h-11 items-center gap-2 rounded-md border border-[#cfe0df] bg-[#f8fbfa] px-3 py-2 text-sm font-semibold text-[#25464a]">
+                <input
+                  className="size-4 accent-brand"
+                  type="checkbox"
+                  checked={userEditForm.is_active}
+                  onChange={(event) => setUserEditForm({ ...userEditForm, is_active: event.target.checked })}
+                />
+                Usuario activo
+              </label>
+              <input className={inputClass} placeholder="Nombre" value={userEditForm.first_name} onChange={(event) => setUserEditForm({ ...userEditForm, first_name: event.target.value })} />
+              <input className={inputClass} placeholder="Apellido" value={userEditForm.last_name} onChange={(event) => setUserEditForm({ ...userEditForm, last_name: event.target.value })} />
+              <input className={inputClass} placeholder="Cargo" value={userEditForm.position} onChange={(event) => setUserEditForm({ ...userEditForm, position: event.target.value })} />
+              <input className={inputClass} placeholder="Área" value={userEditForm.area} onChange={(event) => setUserEditForm({ ...userEditForm, area: event.target.value })} />
+              <input className={inputClass} placeholder="Código de empleado" value={userEditForm.employee_code} onChange={(event) => setUserEditForm({ ...userEditForm, employee_code: event.target.value })} />
+              <select className={inputClass} value={userEditForm.role} onChange={(event) => setUserEditForm({ ...userEditForm, role: event.target.value as UserRole })}>
+                {ROLE_OPTIONS.map((role) => (
+                  <option key={role.value} value={role.value}>{role.label}</option>
+                ))}
+              </select>
+              <label className="relative">
+                <input
+                  className={`${inputClass} pr-10`}
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  placeholder="Cuota IA mensual"
+                  value={userEditForm.role === "administrator" ? 0 : userEditForm.monthly_ai_quota_usd}
+                  disabled={userEditForm.role === "administrator"}
+                  onWheel={ignoreNumberWheel}
+                  onChange={(event) => setUserEditForm({ ...userEditForm, monthly_ai_quota_usd: Number(event.target.value) || 0 })}
+                />
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">USD</span>
+              </label>
+            </div>
+
+            <div className="grid gap-3 rounded-md border border-[#cfe0df] bg-[#f8fbfa] p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div>
+                <strong className="block text-sm text-[#25464a]">Contraseña</strong>
+                <span className={mutedTextClass}>
+                  Se mantiene la clave definida por el usuario. Solo cambia si presionas restablecer.
+                  {editingUser.must_change_password ? " Actualmente debe definir una clave propia al iniciar sesión." : ""}
+                </span>
+              </div>
+              <button
+                className={`${buttonClass} bg-[#486366]`}
+                type="button"
+                onClick={() => resetUserPassword(editingUser.id)}
+                disabled={busy}
+              >
+                <KeyRound size={18} /> Restablecer clave temporal
+              </button>
+            </div>
+
+            <small className={mutedTextClass}>
+              {ROLE_OPTIONS.find((role) => role.value === userEditForm.role)?.description}
+              {userEditForm.role === "administrator" ? " Los administradores no tienen tope mensual de IA." : " La cuota por defecto es 5 USD mensuales."}
+            </small>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => setEditingUser(null)}>
+                Cancelar
+              </button>
+              <button className={buttonClass} type="button" onClick={saveUserEdit} disabled={busy}>
+                <Save size={18} /> Guardar cambios
               </button>
             </div>
           </div>
