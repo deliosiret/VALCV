@@ -48,6 +48,32 @@ def final_decision_text(value: str) -> str:
     return "No definida"
 
 
+def recommendation_scale(summary: dict, template: Template) -> dict[str, float]:
+    scale = summary.get("recommendation_scale") or {}
+    return {
+        "highly_recommended": scale.get("highly_recommended", template.highly_recommended_threshold),
+        "recommended": scale.get("recommended", template.recommended_threshold),
+        "review": scale.get("review", template.review_threshold),
+    }
+
+
+def recommendation_scale_sentence(summary: dict, template: Template) -> str:
+    scale = recommendation_scale(summary, template)
+    return (
+        "La interpretación de la recomendación utiliza la escala definida para este perfil: "
+        f"Altamente recomendable desde {percent(scale['highly_recommended'])}, "
+        f"Recomendable desde {percent(scale['recommended'])}, "
+        f"Requiere revisión desde {percent(scale['review'])} y No recomendable por debajo de ese valor."
+    )
+
+
+def category_results(template: Template, summary: dict) -> list[tuple[str, float, float]]:
+    return [
+        (category.name, category.weight, summary["categories"].get(category.name, 0))
+        for category in template.categories
+    ]
+
+
 def set_cell_shading(cell, fill: str) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     shd = OxmlElement("w:shd")
@@ -174,17 +200,56 @@ def category_narrative(document: Document, template: Template, summary: dict) ->
     body(
         document,
         f"El candidato fue evaluado para el perfil \"{template.name}\" y obtuvo un resultado global de "
-        f"{percent(summary['global_score'])}. La recomendación calculada por la plataforma es: "
+        f"{percent(summary['global_score'])}. La recomendación obtenida es: "
         f"{report_recommendation(summary['recommendation'])}. Este resultado se deriva de los criterios ponderados definidos para el perfil y "
         "de las puntuaciones registradas durante la revisión del expediente.",
     )
+    body(document, recommendation_scale_sentence(summary, template))
     if template.description:
         body(document, f"Descripción del perfil: {template.description}")
 
-    rows = [[category.name, percent(category.weight), percent(summary["categories"].get(category.name, 0))] for category in template.categories]
+    rows = [[name, percent(weight), percent(result)] for name, weight, result in category_results(template, summary)]
     if summary.get("bonus_score", 0) > 0:
         rows.append(["Bonificación adicional", f"Hasta {percent(0.05)}", percent(summary.get("categories", {}).get("Bonificación adicional", 0))])
     add_table(document, ["Categoría", "Participación en el resultado final", "Resultado del candidato"], rows)
+
+
+def executive_synthesis(document: Document, candidate: Candidate, template: Template, criteria: list[Criterion], summary: dict) -> None:
+    heading(document, "Síntesis ejecutiva")
+    results = sorted(category_results(template, summary), key=lambda row: row[2], reverse=True)
+    scale = recommendation_scale(summary, template)
+    if results:
+        strengths = [name for name, _, result in results[:2] if result >= scale["recommended"]]
+        if strengths:
+            body(
+                document,
+                "Las áreas de mejor desempeño se observan en "
+                + ", ".join(strengths)
+                + ". Estos resultados sugieren una correspondencia favorable entre el expediente revisado y los componentes más sólidos del perfil evaluado.",
+            )
+        else:
+            body(
+                document,
+                "No se identifican categorías con desempeño alto. La lectura del resultado debe concentrarse en las brechas observadas y en la validación técnica posterior.",
+            )
+
+        validation = [name for name, _, result in sorted(results, key=lambda row: row[2])[:2] if result < scale["recommended"]]
+        if validation:
+            body(
+                document,
+                "Los aspectos que conviene validar con mayor atención corresponden a "
+                + ", ".join(validation)
+                + ". Estos puntos pueden ser revisados mediante entrevista, prueba temática o verificación documental adicional, según corresponda.",
+            )
+
+    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
+    pending = [criterion.aspect for criterion in criteria if criterion.id not in score_by_criterion]
+    if pending:
+        body(document, "Se identifican criterios pendientes de evaluación o sin puntuación registrada:")
+        for aspect in pending[:6]:
+            bullet(document, aspect)
+        if len(pending) > 6:
+            body(document, f"Además, existen {len(pending) - 6} criterios adicionales sin evaluación registrada.")
 
 
 def candidate_documents_narrative(document: Document, candidate: Candidate) -> None:
@@ -220,14 +285,14 @@ def weights_narrative(document: Document, template: Template, criteria: list[Cri
             if criterion.is_critical:
                 bullet(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
             else:
-                bullet(document, f"{criterion.aspect}. Distribución interna de la categoría: {percent(criterion.within_category_weight)}.")
+                bullet(document, f"{criterion.aspect}. Participación dentro de la categoría: {percent(criterion.within_category_weight)}.")
 
 
 def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
     heading(document, "Análisis por criterio")
     body(
         document,
-        "Esta sección resume las puntuaciones y comentarios registrados para cada criterio evaluado.",
+        "Esta sección resume los resultados y comentarios registrados para cada criterio evaluado.",
     )
     score_by_criterion = {score.criterion_id: score for score in candidate.scores}
     grouped: dict[str, list[Criterion]] = defaultdict(list)
@@ -238,7 +303,7 @@ def evaluation_narrative(document: Document, candidate: Candidate, criteria: lis
         heading(document, category, 2)
         for criterion in children:
             score = score_by_criterion.get(criterion.id)
-            body(document, f"{criterion.aspect}. Puntuación registrada: {score_text(score.score if score else None)}.")
+            body(document, f"{criterion.aspect}. Resultado obtenido: {score_text(score.score if score else None)}.")
             if score and score.rationale:
                 body(document, f"Comentario de evaluación: {score.rationale}")
             if score and score.evaluator_note:
@@ -251,9 +316,9 @@ def bonus_narrative(document: Document, summary: dict) -> None:
     heading(document, "Bonificación adicional")
     body(
         document,
-        f"Después de la evaluación por criterios, se reconoció una bonificación adicional de "
-        f"{score_text(summary.get('bonus_score'))}, con un impacto global de {percent(summary.get('bonus_amount', 0))}. "
-        "Esta bonificación se aplica de forma separada y el resultado final nunca puede exceder el 100%.",
+        f"Además de los criterios principales, se identificaron elementos adicionales favorables con una valoración de "
+        f"{score_text(summary.get('bonus_score'))}, equivalentes a un impacto global de {percent(summary.get('bonus_amount', 0))}. "
+        "Estos elementos complementan la lectura del perfil sin permitir que el resultado final exceda el 100%.",
     )
     if summary.get("bonus_rationale"):
         body(document, f"Justificación: {summary['bonus_rationale']}")
@@ -266,12 +331,12 @@ def conclusion_text(summary: dict, template: Template) -> str:
             "Esta condición impide que el candidato califique globalmente, aun cuando pueda "
             "presentar fortalezas parciales en otras categorías."
         )
-    score = summary["global_score"]
-    if score >= 0.85:
+    recommendation = summary["recommendation"]
+    if recommendation == "Altamente recomendable":
         tone = "El perfil presenta una correspondencia alta con los criterios definidos."
-    elif score >= 0.7:
+    elif recommendation == "Recomendable":
         tone = "El perfil presenta una correspondencia favorable con los criterios definidos, con aspectos que pueden ser revisados en fases posteriores."
-    elif score >= 0.55:
+    elif recommendation == "Requiere revisión":
         tone = "El perfil requiere revisión adicional para determinar si las brechas observadas pueden ser compensadas por entrevista, examen o validación técnica."
     else:
         tone = "El perfil muestra una correspondencia limitada con los criterios definidos para la vacante evaluada."
@@ -288,6 +353,7 @@ def build_candidate_report(candidate: Candidate, template: Template, criteria: l
 
     add_cover(document, candidate, template, summary)
     category_narrative(document, template, summary)
+    executive_synthesis(document, candidate, template, criteria, summary)
     candidate_documents_narrative(document, candidate)
     weights_narrative(document, template, criteria)
     document.add_section(WD_SECTION.NEW_PAGE)
@@ -299,6 +365,12 @@ def build_candidate_report(candidate: Candidate, template: Template, criteria: l
 
     heading(document, "Conclusión")
     body(document, conclusion_text(summary, template))
+    if candidate.final_decision:
+        body(
+            document,
+            f"La decisión final registrada por el evaluador es: {final_decision_text(candidate.final_decision)}. "
+            "Esta determinación debe leerse como el cierre humano del análisis documentado en el presente reporte.",
+        )
     body(
         document,
         "Este reporte tiene carácter de soporte documental. La decisión final sobre el proceso de selección corresponde "
