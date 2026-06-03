@@ -14,6 +14,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ScrollText,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -69,6 +70,14 @@ function candidateColor(index: number) {
 function toPercentInput(value: number) {
   const percent = (Number(value) || 0) * 100;
   return Number.isInteger(percent) ? String(percent) : String(Number(percent.toFixed(4)));
+}
+
+function formatTokens(value?: number) {
+  return new Intl.NumberFormat("es-DO").format(Math.round(Number(value) || 0));
+}
+
+function formatUsd(value?: number) {
+  return `$${(Number(value) || 0).toFixed(6)}`;
 }
 
 function fromPercentInput(value: string) {
@@ -256,6 +265,43 @@ type AISettings = {
   gemini_api_key_configured: boolean;
   gemini_api_key_masked: string;
   gemini_model: string;
+};
+
+type AILog = {
+  id: number;
+  action: string;
+  model: string;
+  status: string;
+  prompt_text: string;
+  response_text: string;
+  error: string;
+  input_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  total_tokens: number;
+  input_cost_usd: number;
+  output_cost_usd: number;
+  total_cost_usd: number;
+  pricing_input_usd_per_1m: number;
+  pricing_output_usd_per_1m: number;
+  pricing_source: string;
+  pricing_reference_date: string;
+  user_id?: number | null;
+  candidate_id?: number | null;
+  template_id?: number | null;
+  created_at: string;
+};
+
+type AILogsResponse = {
+  summary: {
+    total_interactions: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_thinking_tokens: number;
+    total_tokens: number;
+    total_cost_usd: number;
+  };
+  logs: AILog[];
 };
 
 type User = {
@@ -583,6 +629,9 @@ function App() {
   const [aiSettings, setAiSettings] = React.useState<AISettings | null>(null);
   const [aiModels, setAiModels] = React.useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [aiLogsOpen, setAiLogsOpen] = React.useState(false);
+  const [aiLogs, setAiLogs] = React.useState<AILog[]>([]);
+  const [aiLogSummary, setAiLogSummary] = React.useState<AILogsResponse["summary"] | null>(null);
   const [editingApiKey, setEditingApiKey] = React.useState(false);
   const [settingsForm, setSettingsForm] = React.useState({ gemini_api_key: "", gemini_model: "gemini-3.1-flash-lite" });
   const [templateStartOpen, setTemplateStartOpen] = React.useState(false);
@@ -1015,6 +1064,21 @@ function App() {
     }
   }
 
+  async function openAiLogs() {
+    setBusy(true);
+    try {
+      const rows = await api<AILogsResponse>("/settings/ai/logs");
+      setAiLogs(rows.logs);
+      setAiLogSummary(rows.summary);
+      setAiLogsOpen(true);
+      setNotice("Bitácora de IA cargada");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo cargar la bitácora de IA");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openTemplateEditor(action: "new" | "edit" | "duplicate") {
     if (action === "new" || !selectedTemplate) {
       setTemplateDraft(blankTemplateDraft());
@@ -1317,8 +1381,8 @@ function App() {
             <h1 className="text-2xl font-bold leading-tight tracking-normal md:text-4xl">Evaluación de curriculum vitae</h1>
           </div>
         </div>
-        <div className="grid min-w-0 grid-cols-5 items-center gap-2.5 md:flex md:min-w-[420px]">
-          <select className={`${inputClass} col-span-5 md:min-w-60`} value={selectedTemplate?.id ?? ""} onChange={(event) => setSelectedTemplateId(Number(event.target.value))}>
+        <div className="grid min-w-0 grid-cols-6 items-center gap-2.5 md:flex md:min-w-[420px]">
+          <select className={`${inputClass} col-span-6 md:min-w-60`} value={selectedTemplate?.id ?? ""} onChange={(event) => setSelectedTemplateId(Number(event.target.value))}>
             {templates.map((template) => (
               <option key={template.id} value={template.id}>
                 {template.name}
@@ -1337,6 +1401,11 @@ function App() {
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy || (!canManageAiSettings && !canManageUsers)} title="Configuración">
             <Settings size={18} />
           </button>
+          {canManageAiSettings ? (
+            <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={openAiLogs} disabled={busy} title="Logs de IA">
+              <ScrollText size={18} />
+            </button>
+          ) : null}
           <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={logout} disabled={busy} title="Cerrar sesión">
             <LogOut size={18} />
           </button>
@@ -1475,6 +1544,96 @@ function App() {
               </div>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {aiLogsOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/35 p-3">
+          <div className="grid max-h-[92vh] w-full max-w-6xl grid-rows-[auto_auto_1fr] rounded-lg border border-line bg-white shadow-xl">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line p-4">
+              <div>
+                <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+                  <ScrollText size={18} /> Bitácora de IA
+                </h2>
+                <p className="text-sm text-muted">Prompts, respuestas, tokens y costo estimado de las acciones ejecutadas con Gemini.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={openAiLogs} disabled={busy}>
+                  <RefreshCw size={18} /> Actualizar
+                </button>
+                <button className={`${buttonClass} bg-[#486366] px-2`} type="button" onClick={() => setAiLogsOpen(false)} title="Cerrar">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-2 border-b border-line bg-[#f8fbfa] p-4 md:grid-cols-4">
+              <div className="rounded-md bg-white p-3 shadow-sm">
+                <span className={mutedTextClass}>Interacciones</span>
+                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_interactions)}</strong>
+              </div>
+              <div className="rounded-md bg-white p-3 shadow-sm">
+                <span className={mutedTextClass}>Tokens totales</span>
+                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_tokens)}</strong>
+              </div>
+              <div className="rounded-md bg-white p-3 shadow-sm">
+                <span className={mutedTextClass}>Entrada / salida</span>
+                <strong className="text-lg text-ink">{formatTokens(aiLogSummary?.total_input_tokens)} / {formatTokens(aiLogSummary?.total_output_tokens)}</strong>
+              </div>
+              <div className="rounded-md bg-white p-3 shadow-sm">
+                <span className={mutedTextClass}>Costo estimado</span>
+                <strong className="text-lg text-brand">{formatUsd(aiLogSummary?.total_cost_usd)}</strong>
+              </div>
+            </div>
+
+            <div className="min-h-0 overflow-y-auto p-4">
+              <div className="mb-3 rounded-md border border-[#d9e6e5] bg-[#fbfdfc] p-3 text-xs text-muted">
+                Los costos son estimaciones en USD calculadas con precios Standard por millón de tokens. La referencia de precios se guarda con cada interacción.
+              </div>
+              <div className="grid gap-3">
+                {aiLogs.length ? aiLogs.map((log) => (
+                  <details className="rounded-lg border border-[#d9e6e5] bg-white p-3 shadow-sm" key={log.id}>
+                    <summary className="cursor-pointer list-none">
+                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                        <div className="min-w-0">
+                          <strong className="block truncate text-sm text-ink">{log.action.replaceAll("_", " ")} · {log.model}</strong>
+                          <span className={mutedTextClass}>
+                            {new Date(log.created_at).toLocaleString()} · candidato #{log.candidate_id ?? "N/D"} · plantilla #{log.template_id ?? "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                          <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatTokens(log.total_tokens)} tokens</span>
+                          <span className="rounded-full bg-[#eef3f3] px-2 py-1 text-[#25464a]">in {formatTokens(log.input_tokens)} / out {formatTokens(log.output_tokens)}</span>
+                          <span className="rounded-full bg-[#e6f1ef] px-2 py-1 text-brand">{formatUsd(log.total_cost_usd)}</span>
+                        </div>
+                      </div>
+                    </summary>
+                    <div className="mt-3 grid gap-3">
+                      <div className="grid gap-2 rounded-md bg-[#f8fbfa] p-3 text-xs md:grid-cols-3">
+                        <span><strong>Precio entrada:</strong> {formatUsd(log.pricing_input_usd_per_1m)} / 1M</span>
+                        <span><strong>Precio salida:</strong> {formatUsd(log.pricing_output_usd_per_1m)} / 1M</span>
+                        <a className="text-brand underline" href={log.pricing_source} target="_blank" rel="noreferrer">
+                          Precios al {log.pricing_reference_date}
+                        </a>
+                      </div>
+                      <label className="grid gap-1 text-xs font-bold text-[#25464a]">
+                        Prompt enviado
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-[#fbfdfc] p-3 text-xs font-normal text-ink">{log.prompt_text}</pre>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold text-[#25464a]">
+                        Respuesta del modelo
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-[#fbfdfc] p-3 text-xs font-normal text-ink">{log.response_text || log.error || "Sin respuesta registrada"}</pre>
+                      </label>
+                    </div>
+                  </details>
+                )) : (
+                  <div className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">
+                    Todavía no hay interacciones de IA registradas.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 

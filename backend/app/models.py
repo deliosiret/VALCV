@@ -182,3 +182,34 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship()
+
+
+class AIInteractionLog(Base):
+    __tablename__ = "ai_interaction_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    model: Mapped[str] = mapped_column(String(120), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="success")
+    prompt_text: Mapped[str] = mapped_column(Text, default="")
+    response_text: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    thinking_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    input_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    output_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    pricing_input_usd_per_1m: Mapped[float] = mapped_column(Float, default=0)
+    pricing_output_usd_per_1m: Mapped[float] = mapped_column(Float, default=0)
+    pricing_source: Mapped[str] = mapped_column(String(240), default="")
+    pricing_reference_date: Mapped[str] = mapped_column(String(20), default="")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id", ondelete="SET NULL"), nullable=True, index=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+    user: Mapped[User | None] = relationship()
+    candidate: Mapped[Candidate | None] = relationship()
+    template: Mapped[Template | None] = relationship()

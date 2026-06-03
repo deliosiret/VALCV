@@ -1,5 +1,6 @@
 import json
 import mimetypes
+from dataclasses import dataclass
 from pathlib import Path
 
 from google import genai
@@ -21,6 +22,75 @@ Reglas institucionales de evaluación:
 - Para formación, prioriza relevancia regulatoria, eléctrica, energética y de mercados eléctricos sobre formación genérica de otros sectores.
 - Si la evidencia es ambigua, incompleta o no verificable en los documentos, asigna una puntuación conservadora y explícalo.
 """.strip()
+
+
+GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
+GEMINI_PRICING_REFERENCE_DATE = "2026-06-03"
+GEMINI_STANDARD_PRICING_USD_PER_1M = {
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
+    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+}
+
+
+@dataclass
+class GeminiCallResult:
+    payload: dict
+    prompt_text: str
+    response_text: str
+    input_tokens: int
+    output_tokens: int
+    thinking_tokens: int
+    total_tokens: int
+    input_cost_usd: float
+    output_cost_usd: float
+    total_cost_usd: float
+    pricing_input_usd_per_1m: float
+    pricing_output_usd_per_1m: float
+    pricing_source: str = GEMINI_PRICING_SOURCE
+    pricing_reference_date: str = GEMINI_PRICING_REFERENCE_DATE
+
+
+def model_pricing(model: str) -> dict[str, float]:
+    return GEMINI_STANDARD_PRICING_USD_PER_1M.get(model, {"input": 0.0, "output": 0.0})
+
+
+def response_token_usage(response) -> tuple[int, int, int, int]:
+    usage = getattr(response, "usage_metadata", None)
+    input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+    candidates_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+    thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
+    total_tokens = int(getattr(usage, "total_token_count", input_tokens + candidates_tokens + thinking_tokens) or 0)
+    output_tokens = candidates_tokens + thinking_tokens
+    if output_tokens == 0 and total_tokens > input_tokens:
+        output_tokens = total_tokens - input_tokens
+    return input_tokens, output_tokens, thinking_tokens, total_tokens
+
+
+def gemini_result(model: str, prompt_text: str, response) -> GeminiCallResult:
+    response_text = response.text or "{}"
+    input_tokens, output_tokens, thinking_tokens, total_tokens = response_token_usage(response)
+    pricing = model_pricing(model)
+    input_cost = input_tokens * pricing["input"] / 1_000_000
+    output_cost = output_tokens * pricing["output"] / 1_000_000
+    return GeminiCallResult(
+        payload=_extract_json(response_text),
+        prompt_text=prompt_text,
+        response_text=response_text,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        thinking_tokens=thinking_tokens,
+        total_tokens=total_tokens,
+        input_cost_usd=input_cost,
+        output_cost_usd=output_cost,
+        total_cost_usd=input_cost + output_cost,
+        pricing_input_usd_per_1m=pricing["input"],
+        pricing_output_usd_per_1m=pricing["output"],
+    )
 
 
 def _extract_json(text: str) -> dict:
@@ -66,7 +136,7 @@ def evaluate_candidate_with_gemini(
     upload_dir: str,
     api_key: str | None,
     model: str,
-) -> list[dict]:
+) -> GeminiCallResult:
     if not api_key:
         raise RuntimeError("Configura la API key de Gemini antes de evaluar con IA.")
     if not candidate.files:
@@ -107,8 +177,7 @@ def evaluate_candidate_with_gemini(
         contents=contents,
         config=generate_config(model),
     )
-    payload = _extract_json(response.text or "{}")
-    return payload.get("scores", [])
+    return gemini_result(model, prompt, response)
 
 
 def evaluate_candidate_bonus_with_gemini(
@@ -118,7 +187,7 @@ def evaluate_candidate_bonus_with_gemini(
     upload_dir: str,
     api_key: str | None,
     model: str,
-) -> dict:
+) -> GeminiCallResult:
     if not api_key:
         raise RuntimeError("Configura la API key de Gemini antes de evaluar con IA.")
     if not candidate.files:
@@ -156,7 +225,7 @@ def evaluate_candidate_bonus_with_gemini(
         contents=[types.Content(role="user", parts=parts)],
         config=generate_config(model),
     )
-    return _extract_json(response.text or "{}")
+    return gemini_result(model, prompt, response)
 
 
 def generate_template_with_gemini(
@@ -166,7 +235,7 @@ def generate_template_with_gemini(
     file_mime_type: str | None,
     api_key: str | None,
     model: str,
-) -> dict:
+) -> GeminiCallResult:
     if not api_key:
         raise RuntimeError("Configura la API key de Gemini antes de generar plantillas con IA.")
     if not requirements_text.strip() and not file_bytes:
@@ -205,4 +274,4 @@ def generate_template_with_gemini(
         contents=[types.Content(role="user", parts=parts)],
         config=generate_config(model),
     )
-    return _extract_json(response.text or "{}")
+    return gemini_result(model, prompt, response)

@@ -161,6 +161,48 @@ class AISettingsOut(BaseModel):
     gemini_model: str
 
 
+class AIInteractionLogOut(BaseModel):
+    id: int
+    action: str
+    model: str
+    status: str
+    prompt_text: str
+    response_text: str
+    error: str
+    input_tokens: int
+    output_tokens: int
+    thinking_tokens: int
+    total_tokens: int
+    input_cost_usd: float
+    output_cost_usd: float
+    total_cost_usd: float
+    pricing_input_usd_per_1m: float
+    pricing_output_usd_per_1m: float
+    pricing_source: str
+    pricing_reference_date: str
+    user_id: int | None = None
+    candidate_id: int | None = None
+    template_id: int | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AIInteractionLogSummary(BaseModel):
+    total_interactions: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_thinking_tokens: int
+    total_tokens: int
+    total_cost_usd: float
+
+
+class AIInteractionLogsOut(BaseModel):
+    summary: AIInteractionLogSummary
+    logs: list[AIInteractionLogOut]
+
+
 class LoginIn(BaseModel):
     username: str
     password: str

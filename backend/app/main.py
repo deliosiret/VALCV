@@ -14,11 +14,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai import evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
+from app.models import AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
 from app.reports import build_candidate_report
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
+    AIInteractionLogsOut,
     CandidateCreate,
     CandidateOut,
     CandidatePatch,
@@ -546,6 +547,40 @@ def get_ai_config(db: Session) -> tuple[str | None, str]:
     return api_key or None, model or settings.gemini_model
 
 
+def record_ai_interaction(
+    db: Session,
+    action: str,
+    model: str,
+    result,
+    user: User | None = None,
+    candidate_id: int | None = None,
+    template_id: int | None = None,
+):
+    db.add(
+        AIInteractionLog(
+            action=action,
+            model=model,
+            status="success",
+            prompt_text=result.prompt_text,
+            response_text=result.response_text,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            thinking_tokens=result.thinking_tokens,
+            total_tokens=result.total_tokens,
+            input_cost_usd=result.input_cost_usd,
+            output_cost_usd=result.output_cost_usd,
+            total_cost_usd=result.total_cost_usd,
+            pricing_input_usd_per_1m=result.pricing_input_usd_per_1m,
+            pricing_output_usd_per_1m=result.pricing_output_usd_per_1m,
+            pricing_source=result.pricing_source,
+            pricing_reference_date=result.pricing_reference_date,
+            user_id=user.id if user else None,
+            candidate_id=candidate_id,
+            template_id=template_id,
+        )
+    )
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -655,6 +690,25 @@ def list_ai_models(_: User = Depends(get_current_user)):
     return AI_MODEL_OPTIONS
 
 
+@app.get("/settings/ai/logs", response_model=AIInteractionLogsOut)
+def list_ai_logs(
+    _: User = Depends(require_permission("manage_ai_settings")),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=80, ge=1, le=300),
+):
+    logs = db.query(AIInteractionLog).order_by(AIInteractionLog.created_at.desc(), AIInteractionLog.id.desc()).limit(limit).all()
+    all_logs = db.query(AIInteractionLog).all()
+    summary = {
+        "total_interactions": len(all_logs),
+        "total_input_tokens": sum(row.input_tokens or 0 for row in all_logs),
+        "total_output_tokens": sum(row.output_tokens or 0 for row in all_logs),
+        "total_thinking_tokens": sum(row.thinking_tokens or 0 for row in all_logs),
+        "total_tokens": sum(row.total_tokens or 0 for row in all_logs),
+        "total_cost_usd": sum(row.total_cost_usd or 0 for row in all_logs),
+    }
+    return {"summary": summary, "logs": logs}
+
+
 @app.get("/templates", response_model=list[TemplateOut])
 def list_templates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return (
@@ -694,7 +748,7 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_permissio
 async def generate_template_ai(
     requirements_text: str = Form(default=""),
     requirements_file: UploadFile | None = File(default=None),
-    _: User = Depends(require_permission("manage_templates")),
+    user: User = Depends(require_permission("manage_templates")),
     db: Session = Depends(get_db),
 ):
     file_bytes = None
@@ -708,9 +762,12 @@ async def generate_template_ai(
         file_name = requirements_file.filename
     try:
         api_key, model = get_ai_config(db)
-        raw_template = generate_template_with_gemini(requirements_text, file_name, file_bytes, file_mime_type, api_key, model)
-        return clean_generated_template(raw_template)
+        result = generate_template_with_gemini(requirements_text, file_name, file_bytes, file_mime_type, api_key, model)
+        record_ai_interaction(db, "generate_template", model, result, user=user)
+        db.commit()
+        return clean_generated_template(result.payload)
     except Exception as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -953,7 +1010,7 @@ def save_scores(candidate_id: int, payload: list[ScoreIn], _: User = Depends(req
 
 
 @app.post("/candidates/{candidate_id}/evaluate-ai", response_model=CandidateOut)
-def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
+def evaluate_ai(candidate_id: int, user: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
@@ -961,8 +1018,11 @@ def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluat
         raise HTTPException(status_code=400, detail="La plantilla no tiene criterios automáticos.")
     try:
         api_key, model = get_ai_config(db)
-        results = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        record_ai_interaction(db, "evaluate_candidate", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)
+        results = evaluation_result.payload.get("scores", [])
     except Exception as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     valid_ids = {criterion.id for criterion in automatic_criteria}
@@ -978,7 +1038,7 @@ def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluat
     db.flush()
     refreshed_candidate = get_candidate_or_404(db, candidate_id)
     try:
-        bonus = evaluate_candidate_bonus_with_gemini(
+        bonus_result = evaluate_candidate_bonus_with_gemini(
             refreshed_candidate,
             list(template.criteria),
             evaluation_snapshot(refreshed_candidate, list(template.criteria)),
@@ -986,16 +1046,19 @@ def evaluate_ai(candidate_id: int, _: User = Depends(require_permission("evaluat
             api_key,
             model,
         )
+        record_ai_interaction(db, "evaluate_bonus", model, bonus_result, user=user, candidate_id=candidate.id, template_id=template.id)
+        bonus = bonus_result.payload
         refreshed_candidate.ai_bonus_score = max(0.0, min(float(bonus.get("bonus_score", 0) or 0), 5.0))
         refreshed_candidate.ai_bonus_rationale = str(bonus.get("rationale", "") or "")
     except Exception as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=f"No se pudo calcular la bonificación adicional: {exc}") from exc
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 
 
 @app.post("/candidates/{candidate_id}/criteria/{criterion_id}/evaluate-ai", response_model=CandidateOut)
-def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
+def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, user: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     criterion = db.query(Criterion).filter(Criterion.id == criterion_id).first()
@@ -1006,8 +1069,11 @@ def evaluate_single_ai_criterion(candidate_id: int, criterion_id: int, _: User =
     automatic_criteria = [c for c in template.criteria if c.evaluation_mode == EvaluationMode.automatic]
     try:
         api_key, model = get_ai_config(db)
-        results = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        evaluation_result = evaluate_candidate_with_gemini(candidate, automatic_criteria, settings.upload_dir, api_key, model)
+        record_ai_interaction(db, "reevaluate_criterion", model, evaluation_result, user=user, candidate_id=candidate.id, template_id=template.id)
+        results = evaluation_result.payload.get("scores", [])
     except Exception as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     valid_file_ids = {candidate_file.id for candidate_file in candidate.files}
