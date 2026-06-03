@@ -222,9 +222,13 @@ class LoginIn(BaseModel):
     password: str
 
 
+class PasswordChangeIn(BaseModel):
+    new_password: str
+
+
 class UserCreate(BaseModel):
     username: str
-    password: str
+    password: str = ""
     first_name: str = ""
     last_name: str = ""
     position: str = ""
@@ -250,6 +254,7 @@ class UserOut(BaseModel):
     is_admin: bool
     can_view_all: bool
     monthly_ai_quota_usd: float = 5
+    must_change_password: bool = True
     is_active: bool
 
     class Config:

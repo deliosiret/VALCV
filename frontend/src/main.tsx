@@ -330,6 +330,7 @@ type User = {
   is_admin: boolean;
   can_view_all: boolean;
   monthly_ai_quota_usd: number;
+  must_change_password: boolean;
   is_active: boolean;
 };
 
@@ -624,8 +625,9 @@ function App() {
   const [token, setToken] = React.useState(() => localStorage.getItem("valcv_token") ?? "");
   const [user, setUser] = React.useState<User | null>(null);
   const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
+  const [passwordChangeForm, setPasswordChangeForm] = React.useState({ new_password: "" });
   const [users, setUsers] = React.useState<User[]>([]);
-  const [userForm, setUserForm] = React.useState({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5 });
+  const [userForm, setUserForm] = React.useState({ username: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5 });
   const [userFormOpen, setUserFormOpen] = React.useState(false);
   const [templates, setTemplates] = React.useState<Template[]>([]);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
@@ -704,6 +706,10 @@ function App() {
     api<User>("/auth/me")
       .then((currentUser) => {
         setUser(currentUser);
+        if (currentUser.must_change_password) {
+          setNotice("Cambia tu contraseña temporal para continuar.");
+          return undefined;
+        }
         return load();
       })
       .catch((error) => {
@@ -715,7 +721,7 @@ function App() {
   }, [token]);
 
   React.useEffect(() => {
-    if (!token) return;
+    if (!token || user?.must_change_password) return;
     const templateId = selectedTemplate?.id ?? null;
     setSummary([]);
     loadSummary(templateId).catch((error) => setNotice(error.message));
@@ -723,7 +729,7 @@ function App() {
       if (current && filteredCandidates.some((candidate) => candidate.id === current)) return current;
       return filteredCandidates[0]?.id ?? null;
     });
-  }, [token, selectedTemplate?.id, candidates]);
+  }, [token, user?.must_change_password, selectedTemplate?.id, candidates]);
 
   React.useEffect(() => {
     if (settingsOpen && canManageUsers) {
@@ -841,16 +847,36 @@ function App() {
     localStorage.removeItem("valcv_token");
     setToken("");
     setUser(null);
+    setPasswordChangeForm({ new_password: "" });
     setTemplates([]);
     setCandidates([]);
     setSummary([]);
+  }
+
+  async function changeTemporaryPassword(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const updated = await api<User>("/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify(passwordChangeForm),
+      });
+      setUser(updated);
+      setPasswordChangeForm({ new_password: "" });
+      setNotice("Contraseña actualizada");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo cambiar la contraseña");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createUser() {
     setBusy(true);
     try {
       await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
-      setUserForm({ username: "", password: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator", monthly_ai_quota_usd: 5 });
+      setUserForm({ username: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator", monthly_ai_quota_usd: 5 });
       setUserFormOpen(false);
       setUsers(await api<User[]>("/users"));
       setNotice("Usuario creado");
@@ -1403,6 +1429,34 @@ function App() {
     );
   }
 
+  if (user.must_change_password) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-app p-4 text-ink">
+        <form onSubmit={changeTemporaryPassword} className="grid w-full max-w-md gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
+          <div className="grid gap-2">
+            <img className="h-12 w-auto object-contain" src={logoSie} alt="SIE" />
+            <h1 className="text-2xl font-bold">Cambia tu contraseña</h1>
+            <p className="text-sm text-muted">
+              Iniciaste sesión con la contraseña temporal. Define una contraseña diferente para continuar.
+            </p>
+          </div>
+          <input
+            className={inputClass}
+            type="password"
+            autoComplete="new-password"
+            placeholder="Nueva contraseña"
+            value={passwordChangeForm.new_password}
+            onChange={(event) => setPasswordChangeForm({ new_password: event.target.value })}
+            required
+          />
+          <button className={buttonClass} type="submit" disabled={busy}>Guardar contraseña</button>
+          <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={logout} disabled={busy}>Cerrar sesión</button>
+          <small className={mutedTextClass}>{notice}</small>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-app text-ink">
       <header className="grid items-stretch gap-4 border-b border-line bg-white px-4 py-5 md:flex md:items-center md:justify-between md:px-7">
@@ -1727,18 +1781,10 @@ function App() {
                 value={userForm.username}
                 onChange={(event) => setUserForm({ ...userForm, username: event.target.value })}
               />
-              <input
-                className={inputClass}
-                type="password"
-                name="valcv-new-user-secret"
-                autoComplete="new-password"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                placeholder="Contraseña"
-                value={userForm.password}
-                onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
-              />
+              <div className="rounded-md border border-[#cfe0df] bg-[#f8fbfa] px-3 py-2 text-sm">
+                <strong className="block text-[#25464a]">Contraseña inicial</strong>
+                <span className="font-mono text-brand">temporal123</span>
+              </div>
               <input className={inputClass} placeholder="Nombre" value={userForm.first_name} onChange={(event) => setUserForm({ ...userForm, first_name: event.target.value })} />
               <input className={inputClass} placeholder="Apellido" value={userForm.last_name} onChange={(event) => setUserForm({ ...userForm, last_name: event.target.value })} />
               <input className={inputClass} placeholder="Cargo" value={userForm.position} onChange={(event) => setUserForm({ ...userForm, position: event.target.value })} />

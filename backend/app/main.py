@@ -26,6 +26,7 @@ from app.schemas import (
     CandidatePatch,
     CriterionIn,
     LoginIn,
+    PasswordChangeIn,
     ScoreIn,
     ScoreOut,
     SummaryOut,
@@ -40,6 +41,7 @@ from app.scoring import summarize_candidate, upsert_score
 from app.seed import seed_initial_template
 
 app = FastAPI(title="VALCV API", version="0.1.0")
+TEMPORARY_PASSWORD = "temporal123"
 
 
 def serialize_score(score: Score) -> dict:
@@ -144,6 +146,8 @@ def user_permissions(user: User) -> set[str]:
 
 def require_permission(permission: str):
     def dependency(user: User = Depends(get_current_user)) -> User:
+        if user.must_change_password:
+            raise HTTPException(status_code=403, detail="Debes cambiar tu contraseña temporal antes de continuar.")
         if permission not in user_permissions(user):
             raise HTTPException(status_code=403, detail="No tienes permiso para realizar esta acción.")
         return user
@@ -152,6 +156,8 @@ def require_permission(permission: str):
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.must_change_password:
+        raise HTTPException(status_code=403, detail="Debes cambiar tu contraseña temporal antes de continuar.")
     if "manage_users" not in user_permissions(user):
         raise HTTPException(status_code=403, detail="Solo un usuario administrador puede realizar esta acción.")
     return user
@@ -170,6 +176,7 @@ def seed_admin_user(db: Session):
         User(
             username=settings.admin_username,
             password_hash=hash_password(settings.admin_password),
+            must_change_password=False,
             first_name="Administrador",
             last_name="",
             position="Administrador de plataforma",
@@ -464,7 +471,9 @@ def ensure_schema():
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE candidates ADD COLUMN ai_bonus_rationale TEXT NOT NULL DEFAULT ''"))
     user_columns = {column["name"] for column in inspector.get_columns("users")}
+    must_seed_temporary_passwords = "must_change_password" not in user_columns
     user_column_defaults = {
+        "must_change_password": "BOOLEAN NOT NULL DEFAULT TRUE",
         "first_name": "VARCHAR(80) NOT NULL DEFAULT ''",
         "last_name": "VARCHAR(80) NOT NULL DEFAULT ''",
         "position": "VARCHAR(140) NOT NULL DEFAULT ''",
@@ -481,6 +490,12 @@ def ensure_schema():
         connection.execute(text("UPDATE users SET role = 'administrator' WHERE is_admin = TRUE"))
         connection.execute(text("UPDATE users SET role = 'viewer' WHERE is_admin = FALSE AND can_view_all = TRUE AND role = 'evaluator'"))
         connection.execute(text("UPDATE users SET monthly_ai_quota_usd = 0 WHERE is_admin = TRUE OR role = 'administrator'"))
+        connection.execute(text("UPDATE users SET must_change_password = FALSE WHERE username = :admin_username"), {"admin_username": settings.admin_username})
+        if must_seed_temporary_passwords:
+            connection.execute(
+                text("UPDATE users SET password_hash = :password_hash, must_change_password = TRUE WHERE username <> :admin_username"),
+                {"password_hash": hash_password(TEMPORARY_PASSWORD), "admin_username": settings.admin_username},
+            )
     if inspector.has_table("ai_interaction_logs"):
         ai_log_columns = {column["name"] for column in inspector.get_columns("ai_interaction_logs")}
         ai_log_column_defaults = {
@@ -701,6 +716,23 @@ def me(user: User = Depends(get_current_user)):
     return user
 
 
+@app.post("/auth/change-password", response_model=UserOut)
+def change_password(payload: PasswordChangeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    new_password = payload.new_password
+    if not new_password:
+        raise HTTPException(status_code=400, detail="Escribe una nueva contraseña.")
+    if new_password == TEMPORARY_PASSWORD:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe ser diferente a la temporal.")
+    current = db.query(User).filter(User.id == user.id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    current.password_hash = hash_password(new_password)
+    current.must_change_password = False
+    db.commit()
+    db.refresh(current)
+    return current
+
+
 @app.post("/auth/logout")
 def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
     if authorization and authorization.startswith("Bearer "):
@@ -720,13 +752,14 @@ def list_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
 @app.post("/users", response_model=UserOut)
 def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     username = payload.username.strip()
-    if not username or len(payload.password) < 6:
-        raise HTTPException(status_code=400, detail="Usuario requerido y contraseña mínima de 6 caracteres.")
+    if not username:
+        raise HTTPException(status_code=400, detail="Usuario requerido.")
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(status_code=400, detail="Ya existe un usuario con ese nombre.")
     user = User(
         username=username,
-        password_hash=hash_password(payload.password),
+        password_hash=hash_password(TEMPORARY_PASSWORD),
+        must_change_password=True,
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         position=payload.position.strip(),
@@ -773,7 +806,7 @@ def delete_user(user_id: int, current_user: User = Depends(require_admin), db: S
 
 
 @app.get("/settings/ai", response_model=AISettingsOut)
-def read_ai_settings(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def read_ai_settings(_: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     api_key, model = get_ai_config(db)
     return {
         "gemini_api_key_configured": bool(api_key),
@@ -800,7 +833,7 @@ def save_ai_settings(payload: AISettingsIn, _: User = Depends(require_permission
 
 
 @app.get("/settings/ai/models", response_model=list[str])
-def list_ai_models(_: User = Depends(get_current_user)):
+def list_ai_models(_: User = Depends(require_permission("view_results"))):
     return AI_MODEL_OPTIONS
 
 
@@ -810,6 +843,8 @@ def list_ai_logs(
     db: Session = Depends(get_db),
     limit: int = Query(default=80, ge=1, le=300),
 ):
+    if user.must_change_password:
+        raise HTTPException(status_code=403, detail="Debes cambiar tu contraseña temporal antes de continuar.")
     query = db.query(AIInteractionLog)
     if not (user.is_admin or user.role == UserRole.administrator):
         query = query.filter(AIInteractionLog.user_id == user.id)
@@ -834,7 +869,7 @@ def list_ai_logs(
 
 
 @app.get("/templates", response_model=list[TemplateOut])
-def list_templates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_templates(_: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     return (
         db.query(Template)
         .options(selectinload(Template.criteria), selectinload(Template.categories))
