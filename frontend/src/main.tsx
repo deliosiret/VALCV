@@ -1617,7 +1617,7 @@ function App() {
                       onChange={(event) => setPublicApplicationFiles(Array.from(event.target.files ?? []))}
                     />
                     <small className={mutedTextClass}>
-                      {publicApplicationFiles.length ? `${publicApplicationFiles.length} archivo(s) seleccionado(s)` : "PDF o imágenes del CV y soportes."}
+                      {publicApplicationFiles.length ? `${publicApplicationFiles.length} archivo(s) seleccionado(s)` : "PDF o imágenes del CV y soportes. Máximo 100 MB por envío."}
                     </small>
                   </label>
                   <button className={buttonClass} type="submit" disabled={busy || !selectedPublicPosition}>
