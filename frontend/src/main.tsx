@@ -609,7 +609,7 @@ function PassFailRating({
     <div className="grid min-w-[178px] grid-cols-2 gap-1" title={title}>
       <button
         className={`min-h-8 rounded-md border px-2 text-xs font-bold ${
-          passed ? "border-brand bg-[#e6f1ef] text-brand" : "border-line bg-white text-[#486366]"
+          passed ? "border-[#db6400] bg-[#fff7ed] text-[#db6400] shadow-[inset_0_0_0_1px_rgba(219,100,0,0.18)]" : "border-line bg-white text-[#667579]"
         } disabled:cursor-not-allowed disabled:opacity-70`}
         type="button"
         disabled={disabled}
@@ -618,9 +618,7 @@ function PassFailRating({
         Cumple
       </button>
       <button
-        className={`min-h-8 rounded-md border px-2 text-xs font-bold ${
-          !passed ? "border-[#9a3412] bg-[#fff7ed] text-[#9a3412]" : "border-line bg-white text-[#486366]"
-        } disabled:cursor-not-allowed disabled:opacity-70`}
+        className="min-h-8 rounded-md border border-line bg-white px-2 text-xs font-bold text-[#667579] disabled:cursor-not-allowed disabled:opacity-70"
         type="button"
         disabled={disabled}
         onClick={() => onChange(0)}
@@ -2753,7 +2751,7 @@ function App() {
                           const currentScore = draftScores[criterion.id] ?? current?.score ?? 0;
                           const evaluatorNote = draftEvaluatorNotes[criterion.id] ?? current?.evaluator_note ?? "";
                           return (
-                            <article className={`grid gap-2 rounded-md border border-[#e5eeee] border-l-4 bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)] ${criterion.is_critical ? "border-l-[#9a3412]" : "border-l-[#db6400]"}`} key={criterion.id}>
+                            <article className="grid gap-2 rounded-md border border-[#e5eeee] border-l-4 border-l-[#db6400] bg-white p-2.5 shadow-[0_1px_0_rgba(22,105,122,0.05)]" key={criterion.id}>
                               <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_210px] lg:items-center">
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -2776,7 +2774,7 @@ function App() {
                                       </button>
                                     ) : null}
                                     {criterion.is_critical ? (
-                                      <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#fff7ed] px-1.5 text-[10px] font-bold leading-none text-[#9a3412]" title="Si este criterio no cumple, el score general queda en 0.">
+                                      <span className="inline-flex min-h-5 shrink-0 items-center rounded-full bg-[#fff7ed] px-1.5 text-[10px] font-bold leading-none text-[#db6400]" title="Si este criterio no cumple, el score general queda en 0.">
                                         Crítico
                                       </span>
                                     ) : null}
