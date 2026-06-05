@@ -10,6 +10,7 @@ import {
   FileUp,
   Gauge,
   KeyRound,
+  BriefcaseBusiness,
   LogOut,
   Plus,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  Send,
   Trash2,
   UserRoundPlus,
   Users,
@@ -103,6 +105,8 @@ function ignoreNumberWheel(event: React.WheelEvent<HTMLInputElement>) {
 
 type Mode = "manual" | "automatic";
 type UserRole = "administrator" | "template_manager" | "evaluator" | "hr" | "viewer";
+type PositionStatus = "open" | "closed";
+type CompetitionScope = "internal" | "external";
 
 const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = [
   { value: "administrator", label: "Administrador", description: "Gestiona usuarios, IA, plantillas, candidatos y resultados." },
@@ -141,6 +145,8 @@ type Template = {
   description: string;
   ai_evaluation_locked: boolean;
   is_archived: boolean;
+  position_status: PositionStatus;
+  competition_scope: CompetitionScope;
   highly_recommended_threshold: number;
   recommended_threshold: number;
   review_threshold: number;
@@ -162,6 +168,8 @@ type TemplateDraft = {
   name: string;
   description: string;
   ai_evaluation_locked: boolean;
+  position_status: PositionStatus;
+  competition_scope: CompetitionScope;
   highly_recommended_threshold: number;
   recommended_threshold: number;
   review_threshold: number;
@@ -188,6 +196,10 @@ type Candidate = {
   template_id: number;
   name: string;
   document_id: string;
+  applicant_email: string;
+  applicant_phone: string;
+  applicant_employee_code: string;
+  application_source: string;
   evaluator: string;
   evaluator_user_id?: number | null;
   comments: string;
@@ -196,6 +208,13 @@ type Candidate = {
   ai_bonus_rationale: string;
   files: { id: number; original_name: string; mime_type: string; size_bytes: number }[];
   scores: Score[];
+};
+
+type PublicPosition = {
+  id: number;
+  name: string;
+  description: string;
+  competition_scope: CompetitionScope;
 };
 
 type SummaryCandidate = {
@@ -394,6 +413,8 @@ function blankTemplateDraft(): TemplateDraft {
     name: "",
     description: "",
     ai_evaluation_locked: true,
+    position_status: "closed",
+    competition_scope: "external",
     ...DEFAULT_RECOMMENDATION_SCALE,
     categories: [blankCategory()],
     criteria: [],
@@ -417,6 +438,8 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
     name: duplicate ? `Copia de ${template.name}` : template.name,
     description: template.description,
     ai_evaluation_locked: template.ai_evaluation_locked ?? true,
+    position_status: template.position_status ?? "closed",
+    competition_scope: template.competition_scope ?? "external",
     highly_recommended_threshold: template.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold,
     recommended_threshold: template.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold,
     review_threshold: template.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold,
@@ -627,6 +650,11 @@ function App() {
   const [user, setUser] = React.useState<User | null>(null);
   const [loginForm, setLoginForm] = React.useState({ username: "admin", password: "" });
   const [passwordChangeForm, setPasswordChangeForm] = React.useState({ new_password: "" });
+  const [publicPositions, setPublicPositions] = React.useState<PublicPosition[]>([]);
+  const [selectedPublicPositionId, setSelectedPublicPositionId] = React.useState<number | null>(null);
+  const [publicApplicationForm, setPublicApplicationForm] = React.useState({ name: "", document_id: "", applicant_email: "", applicant_phone: "", applicant_employee_code: "", comments: "" });
+  const [publicApplicationFiles, setPublicApplicationFiles] = React.useState<File[]>([]);
+  const [publicFileInputKey, setPublicFileInputKey] = React.useState(0);
   const [users, setUsers] = React.useState<User[]>([]);
   const [userForm, setUserForm] = React.useState({ username: "", first_name: "", last_name: "", position: "", area: "", employee_code: "", role: "evaluator" as UserRole, monthly_ai_quota_usd: 5 });
   const [userFormOpen, setUserFormOpen] = React.useState(false);
@@ -663,6 +691,7 @@ function App() {
   const [busy, setBusy] = React.useState(false);
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
+  const selectedPublicPosition = publicPositions.find((position) => position.id === selectedPublicPositionId) ?? null;
   const canManageUsers = hasPermission(user, "manage_users");
   const canManageAiSettings = hasPermission(user, "manage_ai_settings");
   const canManageTemplates = hasPermission(user, "manage_templates");
@@ -688,6 +717,16 @@ function App() {
     setSummary(summaryRows.candidates);
   }
 
+  async function loadPublicPositions() {
+    try {
+      const rows = await api<PublicPosition[]>("/public/positions");
+      setPublicPositions(rows);
+      setSelectedPublicPositionId((current) => rows.some((position) => position.id === current) ? current : rows[0]?.id ?? null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudieron cargar las posiciones abiertas");
+    }
+  }
+
   async function load() {
     const [templateRows, candidateRows, settingsRows, modelRows] = await Promise.all([
       api<Template[]>("/templates"),
@@ -703,6 +742,10 @@ function App() {
     setSelectedTemplateId((current) => templateRows.some((template) => template.id === current) ? current : templateRows[0]?.id ?? null);
     setSelectedCandidateId((current) => candidateRows.some((candidate) => candidate.id === current) ? current : candidateRows[0]?.id ?? null);
   }
+
+  React.useEffect(() => {
+    loadPublicPositions();
+  }, []);
 
   React.useEffect(() => {
     if (!token) return;
@@ -821,6 +864,36 @@ function App() {
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo crear");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPublicApplication(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedPublicPosition) {
+      setNotice("Selecciona una posición abierta.");
+      return;
+    }
+    const form = new FormData();
+    form.append("template_id", String(selectedPublicPosition.id));
+    form.append("name", publicApplicationForm.name);
+    form.append("document_id", publicApplicationForm.document_id);
+    form.append("applicant_email", publicApplicationForm.applicant_email);
+    form.append("applicant_phone", publicApplicationForm.applicant_phone);
+    form.append("applicant_employee_code", publicApplicationForm.applicant_employee_code);
+    form.append("comments", publicApplicationForm.comments);
+    publicApplicationFiles.forEach((file) => form.append("files", file));
+    setBusy(true);
+    try {
+      await api<Candidate>("/public/applications", { method: "POST", body: form });
+      setPublicApplicationForm({ name: "", document_id: "", applicant_email: "", applicant_phone: "", applicant_employee_code: "", comments: "" });
+      setPublicApplicationFiles([]);
+      setPublicFileInputKey((current) => current + 1);
+      setNotice("Postulación recibida correctamente.");
+      await loadPublicPositions();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo enviar la postulación");
     } finally {
       setBusy(false);
     }
@@ -1225,6 +1298,8 @@ function App() {
         ...DEFAULT_RECOMMENDATION_SCALE,
         ...generated,
         id: undefined,
+        position_status: generated.position_status ?? "closed",
+        competition_scope: generated.competition_scope ?? "external",
         highly_recommended_threshold: generated.highly_recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.highly_recommended_threshold,
         recommended_threshold: generated.recommended_threshold ?? DEFAULT_RECOMMENDATION_SCALE.recommended_threshold,
         review_threshold: generated.review_threshold ?? DEFAULT_RECOMMENDATION_SCALE.review_threshold,
@@ -1387,6 +1462,8 @@ function App() {
       name: draftToSave.name.trim(),
       description: draftToSave.description.trim(),
       ai_evaluation_locked: draftToSave.ai_evaluation_locked,
+      position_status: draftToSave.position_status,
+      competition_scope: draftToSave.competition_scope,
       highly_recommended_threshold: Number(draftToSave.highly_recommended_threshold) || 0,
       recommended_threshold: Number(draftToSave.recommended_threshold) || 0,
       review_threshold: Number(draftToSave.review_threshold) || 0,
@@ -1468,20 +1545,109 @@ function App() {
 
   if (!token || !user) {
     return (
-      <main className="grid min-h-screen place-items-center bg-app p-4 text-ink">
-        <form onSubmit={login} className="grid w-full max-w-sm gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
-          <div className="grid gap-2">
-            <img className="h-12 w-auto object-contain" src={logoSie} alt="SIE" />
-            <h1 className="text-2xl font-bold">Iniciar sesión</h1>
-          </div>
-          <input className={inputClass} placeholder="Usuario" value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} required />
-          <input className={inputClass} type="password" placeholder="Contraseña" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} required />
-          <button className={buttonClass} type="submit" disabled={busy}>Entrar</button>
-          <small className={mutedTextClass}>{notice}</small>
-        </form>
+      <main className="min-h-screen bg-app p-4 text-ink md:p-7">
+        <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="rounded-lg border border-line bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
+              <div className="flex items-center gap-3">
+                <img className="h-12 w-auto object-contain" src={logoSie} alt="SIE" />
+                <div>
+                  <h1 className="text-2xl font-bold leading-tight">Posiciones abiertas</h1>
+                  <p className="text-sm text-muted">Concursos publicados para postulación.</p>
+                </div>
+              </div>
+              <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={loadPublicPositions} disabled={busy}>
+                <RefreshCw size={18} /> Actualizar
+              </button>
+            </div>
+
+            {publicPositions.length ? (
+              <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)]">
+                <div className="grid content-start gap-2">
+                  {publicPositions.map((position) => (
+                    <button
+                      className={`cursor-pointer rounded-lg border p-3 text-left transition ${
+                        selectedPublicPosition?.id === position.id
+                          ? "border-brand bg-[#e6f1ef]"
+                          : "border-[#d9e6e5] bg-[#f8fbfa] hover:border-[#9fc1bf]"
+                      }`}
+                      key={position.id}
+                      type="button"
+                      onClick={() => setSelectedPublicPositionId(position.id)}
+                    >
+                      <span className="mb-2 inline-flex rounded-full bg-white px-2 py-1 text-[11px] font-bold uppercase text-brand">
+                        {position.competition_scope === "internal" ? "Concurso interno" : "Concurso externo"}
+                      </span>
+                      <strong className="block text-sm text-ink">{position.name}</strong>
+                      {position.description ? <span className={mutedTextClass}>{position.description}</span> : null}
+                    </button>
+                  ))}
+                </div>
+
+                <form className="grid gap-3 rounded-lg border border-[#d9e6e5] bg-[#fbfdfc] p-3" onSubmit={submitPublicApplication}>
+                  <div>
+                    <h2 className="flex items-center gap-2 text-base font-semibold">
+                      <BriefcaseBusiness size={18} /> Aplicar a la posición
+                    </h2>
+                    <p className="text-sm text-muted">{selectedPublicPosition?.name}</p>
+                  </div>
+                  {selectedPublicPosition?.competition_scope === "internal" ? (
+                    <div className="rounded-md border border-[#cfe0df] bg-white px-3 py-2 text-sm text-[#25464a]">
+                      Este concurso interno requiere correo institucional <strong>@sie.gov.do</strong> y código de empleado.
+                    </div>
+                  ) : null}
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <input className={inputClass} placeholder="Nombre completo" value={publicApplicationForm.name} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, name: event.target.value })} required />
+                    <input className={inputClass} placeholder="Cédula/ID" value={publicApplicationForm.document_id} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, document_id: event.target.value })} />
+                    <input className={inputClass} type="email" placeholder="Correo electrónico" value={publicApplicationForm.applicant_email} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, applicant_email: event.target.value })} required />
+                    <input className={inputClass} placeholder="Teléfono" value={publicApplicationForm.applicant_phone} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, applicant_phone: event.target.value })} />
+                    {selectedPublicPosition?.competition_scope === "internal" ? (
+                      <input className={inputClass} placeholder="Código de empleado" value={publicApplicationForm.applicant_employee_code} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, applicant_employee_code: event.target.value })} required />
+                    ) : null}
+                  </div>
+                  <textarea className={`${inputClass} min-h-24 resize-y`} placeholder="Comentarios o información adicional" value={publicApplicationForm.comments} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, comments: event.target.value })} />
+                  <label className="grid cursor-pointer gap-1 rounded-md border border-dashed border-[#9fc1bf] bg-white p-3 text-sm font-semibold text-[#25464a]">
+                    <span><FileUp className="mr-1 inline" size={16} /> Documentos de soporte</span>
+                    <input
+                      className="text-sm"
+                      key={publicFileInputKey}
+                      type="file"
+                      multiple
+                      accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif"
+                      onChange={(event) => setPublicApplicationFiles(Array.from(event.target.files ?? []))}
+                    />
+                    <small className={mutedTextClass}>
+                      {publicApplicationFiles.length ? `${publicApplicationFiles.length} archivo(s) seleccionado(s)` : "PDF o imágenes del CV y soportes."}
+                    </small>
+                  </label>
+                  <button className={buttonClass} type="submit" disabled={busy || !selectedPublicPosition}>
+                    <Send size={18} /> Enviar postulación
+                  </button>
+                  <small className={mutedTextClass}>{notice}</small>
+                </form>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#cfe0df] bg-[#f8fbfa] p-5 text-sm text-muted">
+                No hay posiciones abiertas publicadas en este momento.
+              </div>
+            )}
+          </section>
+
+          <form onSubmit={login} className="grid h-fit gap-3 rounded-lg border border-line bg-white p-5 shadow-sm">
+            <div className="grid gap-2">
+              <img className="h-12 w-auto object-contain" src={logoSie} alt="SIE" />
+              <h2 className="text-2xl font-bold">Iniciar sesión</h2>
+              <p className="text-sm text-muted">Acceso para evaluadores y administradores.</p>
+            </div>
+            <input className={inputClass} placeholder="Usuario" value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} required />
+            <input className={inputClass} type="password" placeholder="Contraseña" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} required />
+            <button className={buttonClass} type="submit" disabled={busy}>Entrar</button>
+            <small className={mutedTextClass}>{notice}</small>
+          </form>
+        </div>
       </main>
     );
-  }
+	  }
 
   if (user.must_change_password) {
     return (
@@ -2133,6 +2299,37 @@ function App() {
               </label>
 
               <section className="mb-4 rounded-lg border border-[#d9e6e5] bg-[#fbfdfc] p-3">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold text-ink">Publicación de la posición</h3>
+                  <span className={mutedTextClass}>Define si esta posición aparece para postulantes y si corresponde a concurso interno o externo.</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Estado
+                    <select
+                      className={inputClass}
+                      value={templateDraft.position_status}
+                      onChange={(event) => setTemplateDraft({ ...templateDraft, position_status: event.target.value as PositionStatus })}
+                    >
+                      <option value="closed">Cerrada</option>
+                      <option value="open">Abierta</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1.5 text-sm font-semibold">
+                    Tipo de concurso
+                    <select
+                      className={inputClass}
+                      value={templateDraft.competition_scope}
+                      onChange={(event) => setTemplateDraft({ ...templateDraft, competition_scope: event.target.value as CompetitionScope })}
+                    >
+                      <option value="external">Externo</option>
+                      <option value="internal">Interno</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <section className="mb-4 rounded-lg border border-[#d9e6e5] bg-[#fbfdfc] p-3">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-ink">Escala de recomendación</h3>
@@ -2355,9 +2552,11 @@ function App() {
                   onClick={() => setSelectedCandidateId(candidate.id)}
                   type="button"
                 >
-                  <strong className="truncate">{candidate.name}</strong>
-                  <span className={candidate.id === selectedCandidate?.id ? "block truncate text-xs leading-snug text-[#dceff0]" : mutedTextClass}>{candidate.document_id || "Sin ID"}</span>
-                </button>
+	                  <strong className="truncate">{candidate.name}</strong>
+	                  <span className={candidate.id === selectedCandidate?.id ? "block truncate text-xs leading-snug text-[#dceff0]" : mutedTextClass}>
+	                    {candidate.document_id || "Sin ID"}{candidate.application_source?.startsWith("public") ? " · postulación web" : ""}
+	                  </span>
+	                </button>
                 {canManageCandidates ? (
                   <button
                     className={`grid size-9 cursor-pointer place-items-center rounded-md ${
@@ -2427,12 +2626,26 @@ function App() {
             {selectedCandidate ? (
               <>
                 <div className="grid items-stretch gap-2.5 border-b border-[#e5eeee] pb-3.5 md:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto] md:items-center">
-                  <div>
-                    <strong>{selectedCandidate.name}</strong>
-                    <span className={mutedTextClass}>
-                      {selectedCandidate.files.length} archivo(s) cargado(s) · {autosaveState === "saving" ? "guardando..." : autosaveState === "saved" ? "guardado" : autosaveState === "error" ? "error al guardar" : "autoguardado"}
-                    </span>
-                  </div>
+	                  <div>
+	                    <div className="flex flex-wrap items-center gap-2">
+	                      <strong>{selectedCandidate.name}</strong>
+	                      {selectedCandidate.application_source?.startsWith("public") ? (
+	                        <span className="rounded-full bg-[#e6f1ef] px-2 py-0.5 text-[11px] font-bold uppercase text-brand">
+	                          Postulación web
+	                        </span>
+	                      ) : null}
+	                    </div>
+	                    <span className={mutedTextClass}>
+	                      {selectedCandidate.files.length} archivo(s) cargado(s) · {autosaveState === "saving" ? "guardando..." : autosaveState === "saved" ? "guardado" : autosaveState === "error" ? "error al guardar" : "autoguardado"}
+	                    </span>
+	                    {selectedCandidate.applicant_email || selectedCandidate.applicant_phone || selectedCandidate.applicant_employee_code ? (
+	                      <span className="mt-1 block text-xs leading-snug text-[#486366]">
+	                        {selectedCandidate.applicant_email ? `Correo: ${selectedCandidate.applicant_email}` : ""}
+	                        {selectedCandidate.applicant_phone ? `${selectedCandidate.applicant_email ? " · " : ""}Tel.: ${selectedCandidate.applicant_phone}` : ""}
+	                        {selectedCandidate.applicant_employee_code ? ` · Código empleado: ${selectedCandidate.applicant_employee_code}` : ""}
+	                      </span>
+	                    ) : null}
+	                  </div>
                   <label className={`${buttonClass} ${!canEvaluateCandidates ? "pointer-events-none opacity-55" : ""}`} title="Cargar PDF o imagen">
                     <FileUp size={18} />
                     <input className="hidden" type="file" multiple disabled={!canEvaluateCandidates} accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />

@@ -44,6 +44,8 @@ class TemplateCreate(BaseModel):
     name: str
     description: str = ""
     ai_evaluation_locked: bool = True
+    position_status: str = "closed"
+    competition_scope: str = "external"
     highly_recommended_threshold: float = Field(default=0.85, ge=0, le=1)
     recommended_threshold: float = Field(default=0.7, ge=0, le=1)
     review_threshold: float = Field(default=0.55, ge=0, le=1)
@@ -57,6 +59,8 @@ class TemplateOut(BaseModel):
     description: str
     ai_evaluation_locked: bool = True
     is_archived: bool = False
+    position_status: str = "closed"
+    competition_scope: str = "external"
     highly_recommended_threshold: float = 0.85
     recommended_threshold: float = 0.7
     review_threshold: float = 0.55
@@ -68,9 +72,22 @@ class TemplateOut(BaseModel):
         from_attributes = True
 
 
+class PublicPositionOut(BaseModel):
+    id: int
+    name: str
+    description: str = ""
+    competition_scope: str = "external"
+
+    class Config:
+        from_attributes = True
+
+
 class CandidateCreate(BaseModel):
     name: str
     document_id: str = ""
+    applicant_email: str = ""
+    applicant_phone: str = ""
+    applicant_employee_code: str = ""
     comments: str = ""
     template_id: int
 
@@ -78,6 +95,9 @@ class CandidateCreate(BaseModel):
 class CandidatePatch(BaseModel):
     name: str | None = None
     document_id: str | None = None
+    applicant_email: str | None = None
+    applicant_phone: str | None = None
+    applicant_employee_code: str | None = None
     evaluator: str | None = None
     comments: str | None = None
     final_decision: str | None = None
@@ -122,6 +142,10 @@ class CandidateOut(BaseModel):
     template_id: int
     name: str
     document_id: str
+    applicant_email: str = ""
+    applicant_phone: str = ""
+    applicant_employee_code: str = ""
+    application_source: str = "manual"
     evaluator: str
     evaluator_user_id: int | None = None
     comments: str

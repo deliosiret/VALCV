@@ -27,6 +27,7 @@ from app.schemas import (
     CriterionIn,
     LoginIn,
     PasswordChangeIn,
+    PublicPositionOut,
     ScoreIn,
     ScoreOut,
     SummaryOut,
@@ -43,6 +44,10 @@ from app.seed import seed_initial_template
 
 app = FastAPI(title="VALCV API", version="0.1.0")
 TEMPORARY_PASSWORD = "temporal123"
+POSITION_STATUSES = {"open", "closed"}
+COMPETITION_SCOPES = {"internal", "external"}
+PUBLIC_EVALUATOR_NAME = "Postulación pública"
+ALLOWED_APPLICATION_FILE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
 
 
 def serialize_score(score: Score) -> dict:
@@ -68,6 +73,16 @@ def clean_file_ids(raw_file_ids, valid_file_ids: set[int]) -> list[int]:
         if file_id in valid_file_ids:
             cleaned.append(file_id)
     return list(dict.fromkeys(cleaned))
+
+
+def clean_template_publication_fields(payload: TemplateCreate) -> tuple[str, str]:
+    position_status = (payload.position_status or "closed").strip().lower()
+    competition_scope = (payload.competition_scope or "external").strip().lower()
+    if position_status not in POSITION_STATUSES:
+        raise HTTPException(status_code=400, detail="Estado de posición inválido.")
+    if competition_scope not in COMPETITION_SCOPES:
+        raise HTTPException(status_code=400, detail="Tipo de concurso inválido.")
+    return position_status, competition_scope
 
 
 def evaluation_snapshot(candidate: Candidate, criteria: list[Criterion]) -> list[dict]:
@@ -440,6 +455,14 @@ def ensure_schema():
     if "is_archived" not in template_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE templates ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
+    template_publication_columns = {
+        "position_status": "VARCHAR(24) NOT NULL DEFAULT 'closed'",
+        "competition_scope": "VARCHAR(24) NOT NULL DEFAULT 'external'",
+    }
+    for column_name, definition in template_publication_columns.items():
+        if column_name not in template_columns:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE templates ADD COLUMN {column_name} {definition}"))
     template_thresholds = {
         "highly_recommended_threshold": "DOUBLE PRECISION NOT NULL DEFAULT 0.85",
         "recommended_threshold": "DOUBLE PRECISION NOT NULL DEFAULT 0.7",
@@ -471,6 +494,16 @@ def ensure_schema():
     if "ai_bonus_rationale" not in candidate_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE candidates ADD COLUMN ai_bonus_rationale TEXT NOT NULL DEFAULT ''"))
+    candidate_application_columns = {
+        "applicant_email": "VARCHAR(160) NOT NULL DEFAULT ''",
+        "applicant_phone": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "applicant_employee_code": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "application_source": "VARCHAR(40) NOT NULL DEFAULT 'manual'",
+    }
+    for column_name, definition in candidate_application_columns.items():
+        if column_name not in candidate_columns:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE candidates ADD COLUMN {column_name} {definition}"))
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     must_seed_temporary_passwords = "must_change_password" not in user_columns
     user_column_defaults = {
@@ -563,6 +596,33 @@ def delete_uploaded_files(candidate_files: list[CandidateFile]):
     for candidate_file in candidate_files:
         file_path = Path(settings.upload_dir) / candidate_file.stored_name
         file_path.unlink(missing_ok=True)
+
+
+def save_candidate_uploads(db: Session, candidate: Candidate, files: list[UploadFile] | None) -> list[CandidateFile]:
+    created_files = []
+    upload_path = Path(settings.upload_dir)
+    upload_path.mkdir(parents=True, exist_ok=True)
+    for uploaded in files or []:
+        if not uploaded.filename:
+            continue
+        mime_type = uploaded.content_type or "application/octet-stream"
+        if mime_type not in ALLOWED_APPLICATION_FILE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Tipo no soportado: {mime_type}")
+        suffix = Path(uploaded.filename or "").suffix.lower()
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        destination = upload_path / stored_name
+        with destination.open("wb") as buffer:
+            shutil.copyfileobj(uploaded.file, buffer)
+        candidate_file = CandidateFile(
+            candidate_id=candidate.id,
+            original_name=uploaded.filename or stored_name,
+            stored_name=stored_name,
+            mime_type=mime_type,
+            size_bytes=destination.stat().st_size,
+        )
+        created_files.append(candidate_file)
+        db.add(candidate_file)
+    return created_files
 
 
 def get_setting(db: Session, key: str, default: str = "") -> str:
@@ -838,6 +898,67 @@ def reset_user_password(user_id: int, _: User = Depends(require_admin), db: Sess
     return user
 
 
+@app.get("/public/positions", response_model=list[PublicPositionOut])
+def list_public_positions(db: Session = Depends(get_db)):
+    return (
+        db.query(Template)
+        .filter(Template.is_archived.is_(False), Template.position_status == "open")
+        .order_by(Template.name)
+        .all()
+    )
+
+
+@app.post("/public/applications", response_model=CandidateOut)
+def submit_public_application(
+    template_id: int = Form(...),
+    name: str = Form(...),
+    document_id: str = Form(default=""),
+    applicant_email: str = Form(...),
+    applicant_phone: str = Form(default=""),
+    applicant_employee_code: str = Form(default=""),
+    comments: str = Form(default=""),
+    files: list[UploadFile] | None = File(default=None),
+    db: Session = Depends(get_db),
+):
+    template = get_template_or_404(db, template_id)
+    if template.is_archived or template.position_status != "open":
+        raise HTTPException(status_code=400, detail="Esta posición no está abierta para postulaciones.")
+    clean_name = name.strip()
+    clean_email = applicant_email.strip().lower()
+    clean_employee_code = applicant_employee_code.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="El nombre es obligatorio.")
+    if not clean_email:
+        raise HTTPException(status_code=400, detail="El correo electrónico es obligatorio.")
+    if template.competition_scope == "internal":
+        if not clean_email.endswith("@sie.gov.do"):
+            raise HTTPException(status_code=400, detail="Este concurso interno requiere un correo institucional @sie.gov.do.")
+        if not clean_employee_code:
+            raise HTTPException(status_code=400, detail="Este concurso interno requiere el código de empleado.")
+    candidate = Candidate(
+        template_id=template.id,
+        name=clean_name,
+        document_id=document_id.strip(),
+        applicant_email=clean_email,
+        applicant_phone=applicant_phone.strip(),
+        applicant_employee_code=clean_employee_code,
+        application_source="public_internal" if template.competition_scope == "internal" else "public_external",
+        evaluator=PUBLIC_EVALUATOR_NAME,
+        comments=comments.strip(),
+    )
+    db.add(candidate)
+    db.flush()
+    created_files = []
+    try:
+        created_files = save_candidate_uploads(db, candidate, files)
+        db.commit()
+    except Exception:
+        db.rollback()
+        delete_uploaded_files(created_files)
+        raise
+    return get_candidate_or_404(db, candidate.id)
+
+
 @app.delete("/users/{user_id}")
 def delete_user(user_id: int, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
     if user_id == current_user.id:
@@ -931,10 +1052,13 @@ def create_template(payload: TemplateCreate, _: User = Depends(require_permissio
     categories, criteria = normalized_template_parts(payload)
     validate_template_structure(categories, criteria)
     validate_recommendation_scale(payload)
+    position_status, competition_scope = clean_template_publication_fields(payload)
     template = Template(
         name=payload.name,
         description=payload.description,
         ai_evaluation_locked=payload.ai_evaluation_locked,
+        position_status=position_status,
+        competition_scope=competition_scope,
         highly_recommended_threshold=payload.highly_recommended_threshold,
         recommended_threshold=payload.recommended_threshold,
         review_threshold=payload.review_threshold,
@@ -984,9 +1108,12 @@ def replace_template(template_id: int, payload: TemplateCreate, _: User = Depend
     categories, criteria = normalized_template_parts(payload)
     validate_template_structure(categories, criteria)
     validate_recommendation_scale(payload)
+    position_status, competition_scope = clean_template_publication_fields(payload)
     template.name = payload.name
     template.description = payload.description
     template.ai_evaluation_locked = payload.ai_evaluation_locked
+    template.position_status = position_status
+    template.competition_scope = competition_scope
     template.highly_recommended_threshold = payload.highly_recommended_threshold
     template.recommended_threshold = payload.recommended_threshold
     template.review_threshold = payload.review_threshold
@@ -1108,28 +1235,7 @@ def reset_candidate_evaluation(candidate_id: int, _: User = Depends(require_perm
 @app.post("/candidates/{candidate_id}/files", response_model=CandidateOut)
 def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
-    allowed = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
-    upload_path = Path(settings.upload_dir)
-    upload_path.mkdir(parents=True, exist_ok=True)
-
-    for uploaded in files:
-        mime_type = uploaded.content_type or "application/octet-stream"
-        if mime_type not in allowed:
-            raise HTTPException(status_code=400, detail=f"Tipo no soportado: {mime_type}")
-        suffix = Path(uploaded.filename or "").suffix.lower()
-        stored_name = f"{uuid.uuid4().hex}{suffix}"
-        destination = upload_path / stored_name
-        with destination.open("wb") as buffer:
-            shutil.copyfileobj(uploaded.file, buffer)
-        db.add(
-            CandidateFile(
-                candidate_id=candidate.id,
-                original_name=uploaded.filename or stored_name,
-                stored_name=stored_name,
-                mime_type=mime_type,
-                size_bytes=destination.stat().st_size,
-            )
-        )
+    save_candidate_uploads(db, candidate, files)
     db.commit()
     return get_candidate_or_404(db, candidate_id)
 
