@@ -763,26 +763,36 @@ function App() {
 
   React.useEffect(() => {
     if (!token) return;
+    let cancelled = false;
     api<User>("/auth/me")
       .then((currentUser) => {
+        if (cancelled) return;
         setUser(currentUser);
         if (currentUser.must_change_password) {
           setNotice("Cambia tu contraseña temporal para continuar.");
-          return undefined;
+          return;
         }
         if (!hasAcceptedTerms(currentUser)) {
           setNotice("Lee y acepta las condiciones de uso para continuar.");
-          return undefined;
+          return;
         }
-        return load();
       })
       .catch((error) => {
+        if (cancelled) return;
         localStorage.removeItem("valcv_token");
         setToken("");
         setUser(null);
         setNotice(error.message);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
+
+  React.useEffect(() => {
+    if (!token || !user || user.must_change_password || !hasAcceptedTerms(user)) return;
+    load().catch((error) => setNotice(error instanceof Error ? error.message : "No se pudieron cargar los datos"));
+  }, [token, user?.id, user?.must_change_password, user?.terms_accepted_at, user?.terms_version]);
 
   React.useEffect(() => {
     if (!token || user?.must_change_password || !hasAcceptedTerms(user)) return;
