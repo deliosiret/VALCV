@@ -60,6 +60,7 @@ const headingClass = "mb-3.5 flex items-center gap-2 text-base font-semibold tra
 const mutedTextClass = "block text-xs leading-snug text-muted";
 const aiLockedTitle = "Este criterio fue evaluado por IA y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
 const AI_EVALUATOR_NOTE_PLACEHOLDER = "Nota complementaria del evaluador: úsala si el juicio de la IA quedó incompleto o requiere contexto experto adicional.";
+const PUBLIC_APPLICATION_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const DEFAULT_RECOMMENDATION_SCALE = {
   highly_recommended_threshold: 0.85,
   recommended_threshold: 0.7,
@@ -81,6 +82,12 @@ function formatTokens(value?: number) {
 
 function formatUsd(value?: number) {
   return `$${(Number(value) || 0).toFixed(6)}`;
+}
+
+function formatFileSize(bytes: number) {
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1) return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function fromPercentInput(value: string) {
@@ -692,6 +699,8 @@ function App() {
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templates[0];
   const selectedPublicPosition = publicPositions.find((position) => position.id === selectedPublicPositionId) ?? null;
+  const publicApplicationFilesSize = publicApplicationFiles.reduce((total, file) => total + file.size, 0);
+  const publicApplicationFilesTooLarge = publicApplicationFilesSize > PUBLIC_APPLICATION_MAX_UPLOAD_BYTES;
   const canManageUsers = hasPermission(user, "manage_users");
   const canManageAiSettings = hasPermission(user, "manage_ai_settings");
   const canManageTemplates = hasPermission(user, "manage_templates");
@@ -873,6 +882,10 @@ function App() {
     event.preventDefault();
     if (!selectedPublicPosition) {
       setNotice("Selecciona una posición abierta.");
+      return;
+    }
+    if (publicApplicationFilesTooLarge) {
+      setNotice(`Los documentos seleccionados pesan ${formatFileSize(publicApplicationFilesSize)} y superan el máximo permitido de ${formatFileSize(PUBLIC_APPLICATION_MAX_UPLOAD_BYTES)}.`);
       return;
     }
     const form = new FormData();
@@ -1606,7 +1619,11 @@ function App() {
                     ) : null}
                   </div>
                   <textarea className={`${inputClass} min-h-24 resize-y`} placeholder="Comentarios o información adicional" value={publicApplicationForm.comments} onChange={(event) => setPublicApplicationForm({ ...publicApplicationForm, comments: event.target.value })} />
-                  <label className="grid cursor-pointer gap-1 rounded-md border border-dashed border-[#9fc1bf] bg-white p-3 text-sm font-semibold text-[#25464a]">
+                  <label className={`grid cursor-pointer gap-1 rounded-md border border-dashed p-3 text-sm font-semibold ${
+                    publicApplicationFilesTooLarge
+                      ? "border-[#dc2626] bg-[#fef2f2] text-[#991b1b]"
+                      : "border-[#9fc1bf] bg-white text-[#25464a]"
+                  }`}>
                     <span><FileUp className="mr-1 inline" size={16} /> Documentos de soporte</span>
                     <input
                       className="text-sm"
@@ -1616,11 +1633,23 @@ function App() {
                       accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif"
                       onChange={(event) => setPublicApplicationFiles(Array.from(event.target.files ?? []))}
                     />
-                    <small className={mutedTextClass}>
-                      {publicApplicationFiles.length ? `${publicApplicationFiles.length} archivo(s) seleccionado(s)` : "PDF o imágenes del CV y soportes. Máximo 100 MB por envío."}
+                    <small className={publicApplicationFilesTooLarge ? "block text-xs leading-snug text-[#991b1b]" : mutedTextClass}>
+                      {publicApplicationFiles.length
+                        ? `${publicApplicationFiles.length} archivo(s), ${formatFileSize(publicApplicationFilesSize)} en total. Máximo ${formatFileSize(PUBLIC_APPLICATION_MAX_UPLOAD_BYTES)}.`
+                        : `PDF o imágenes del CV y soportes. Máximo ${formatFileSize(PUBLIC_APPLICATION_MAX_UPLOAD_BYTES)} por envío.`}
                     </small>
+                    {publicApplicationFilesTooLarge ? (
+                      <strong className="text-xs text-[#991b1b]">
+                        Los documentos superan el límite permitido. Reduce el tamaño o quita archivos para continuar.
+                      </strong>
+                    ) : null}
                   </label>
-                  <button className={buttonClass} type="submit" disabled={busy || !selectedPublicPosition}>
+                  <button
+                    className={buttonClass}
+                    type="submit"
+                    disabled={busy || !selectedPublicPosition || publicApplicationFilesTooLarge}
+                    title={publicApplicationFilesTooLarge ? "Los documentos superan el máximo permitido de carga" : "Enviar postulación"}
+                  >
                     <Send size={18} /> Enviar postulación
                   </button>
                   <small className={mutedTextClass}>{notice}</small>
