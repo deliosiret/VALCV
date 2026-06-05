@@ -2818,10 +2818,7 @@ function App() {
                               />
                               {isAutomatic ? (
                                 <div className="grid gap-1">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-semibold text-[#25464a]">Nota complementaria del evaluador</span>
-                                    <span className="rounded-full bg-[#f4e8de] px-1.5 py-0.5 text-[10px] font-bold text-[#9a3412]">Editable</span>
-                                  </div>
+                                  <span className="text-xs font-semibold text-[#25464a]">Nota complementaria del evaluador</span>
                                   <textarea
                                     className={`${inputClass} min-h-16 resize-y border-[#e0c9b8] bg-[#fffaf6] text-sm focus:border-[#db6400] focus:ring-[#db6400]/15`}
                                     placeholder={AI_EVALUATOR_NOTE_PLACEHOLDER}
