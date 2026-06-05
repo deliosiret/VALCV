@@ -291,6 +291,8 @@ class UserOut(BaseModel):
     can_view_all: bool
     monthly_ai_quota_usd: float = 5
     must_change_password: bool = True
+    terms_accepted_at: datetime | None = None
+    terms_version: str = ""
     is_active: bool
 
     class Config:

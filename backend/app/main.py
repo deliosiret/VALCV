@@ -44,6 +44,7 @@ from app.seed import seed_initial_template
 
 app = FastAPI(title="VALCV API", version="0.1.0")
 TEMPORARY_PASSWORD = "temporal123"
+TERMS_VERSION = "VALCV-2026-06"
 POSITION_STATUSES = {"open", "closed"}
 COMPETITION_SCOPES = {"internal", "external"}
 PUBLIC_EVALUATOR_NAME = "Postulación pública"
@@ -164,6 +165,8 @@ def require_permission(permission: str):
     def dependency(user: User = Depends(get_current_user)) -> User:
         if user.must_change_password:
             raise HTTPException(status_code=403, detail="Debes cambiar tu contraseña temporal antes de continuar.")
+        if not user.terms_accepted_at or user.terms_version != TERMS_VERSION:
+            raise HTTPException(status_code=403, detail="Debes aceptar las condiciones de uso de la plataforma antes de continuar.")
         if permission not in user_permissions(user):
             raise HTTPException(status_code=403, detail="No tienes permiso para realizar esta acción.")
         return user
@@ -174,6 +177,8 @@ def require_permission(permission: str):
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.must_change_password:
         raise HTTPException(status_code=403, detail="Debes cambiar tu contraseña temporal antes de continuar.")
+    if not user.terms_accepted_at or user.terms_version != TERMS_VERSION:
+        raise HTTPException(status_code=403, detail="Debes aceptar las condiciones de uso de la plataforma antes de continuar.")
     if "manage_users" not in user_permissions(user):
         raise HTTPException(status_code=403, detail="Solo un usuario administrador puede realizar esta acción.")
     return user
@@ -515,6 +520,8 @@ def ensure_schema():
         "employee_code": "VARCHAR(60) NOT NULL DEFAULT ''",
         "role": "user_role NOT NULL DEFAULT 'evaluator'",
         "monthly_ai_quota_usd": "DOUBLE PRECISION NOT NULL DEFAULT 5",
+        "terms_accepted_at": "TIMESTAMP NULL",
+        "terms_version": "VARCHAR(40) NOT NULL DEFAULT ''",
     }
     for column_name, definition in user_column_defaults.items():
         if column_name not in user_columns:
@@ -789,6 +796,20 @@ def change_password(payload: PasswordChangeIn, user: User = Depends(get_current_
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     current.password_hash = hash_password(new_password)
     current.must_change_password = False
+    db.commit()
+    db.refresh(current)
+    return current
+
+
+@app.post("/auth/accept-terms", response_model=UserOut)
+def accept_terms(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current = db.query(User).filter(User.id == user.id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if current.must_change_password:
+        raise HTTPException(status_code=400, detail="Primero debes cambiar tu contraseña temporal.")
+    current.terms_accepted_at = datetime.utcnow()
+    current.terms_version = TERMS_VERSION
     db.commit()
     db.refresh(current)
     return current

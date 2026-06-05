@@ -61,6 +61,7 @@ const mutedTextClass = "block text-xs leading-snug text-muted";
 const aiLockedTitle = "Este criterio fue evaluado por IA y la plantilla bloquea la edición manual de puntuación, evidencia y documentos.";
 const AI_EVALUATOR_NOTE_PLACEHOLDER = "Nota complementaria del evaluador: úsala si el juicio de la IA quedó incompleto o requiere contexto experto adicional.";
 const PUBLIC_APPLICATION_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const TERMS_VERSION = "VALCV-2026-06";
 const DEFAULT_RECOMMENDATION_SCALE = {
   highly_recommended_threshold: 0.85,
   recommended_threshold: 0.7,
@@ -358,6 +359,8 @@ type User = {
   can_view_all: boolean;
   monthly_ai_quota_usd: number;
   must_change_password: boolean;
+  terms_accepted_at?: string | null;
+  terms_version: string;
   is_active: boolean;
 };
 
@@ -372,6 +375,10 @@ function userFullName(user?: User | null) {
 function hasPermission(user: User | null, permission: string) {
   if (!user) return false;
   return user.is_admin || ROLE_PERMISSIONS[user.role]?.includes(permission);
+}
+
+function hasAcceptedTerms(user: User | null) {
+  return Boolean(user?.terms_accepted_at && user.terms_version === TERMS_VERSION);
 }
 
 function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -763,6 +770,10 @@ function App() {
           setNotice("Cambia tu contraseña temporal para continuar.");
           return undefined;
         }
+        if (!hasAcceptedTerms(currentUser)) {
+          setNotice("Lee y acepta las condiciones de uso para continuar.");
+          return undefined;
+        }
         return load();
       })
       .catch((error) => {
@@ -774,7 +785,7 @@ function App() {
   }, [token]);
 
   React.useEffect(() => {
-    if (!token || user?.must_change_password) return;
+    if (!token || user?.must_change_password || !hasAcceptedTerms(user)) return;
     const templateId = selectedTemplate?.id ?? null;
     setSummary([]);
     loadSummary(templateId).catch((error) => setNotice(error.message));
@@ -782,7 +793,7 @@ function App() {
       if (current && filteredCandidates.some((candidate) => candidate.id === current)) return current;
       return filteredCandidates[0]?.id ?? null;
     });
-  }, [token, user?.must_change_password, selectedTemplate?.id, candidates]);
+  }, [token, user?.must_change_password, user?.terms_accepted_at, user?.terms_version, selectedTemplate?.id, candidates]);
 
   React.useEffect(() => {
     if (settingsOpen && canManageUsers) {
@@ -954,6 +965,20 @@ function App() {
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo cambiar la contraseña");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptTerms() {
+    setBusy(true);
+    try {
+      const updated = await api<User>("/auth/accept-terms", { method: "POST" });
+      setUser(updated);
+      setNotice("Condiciones de uso aceptadas");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudieron aceptar las condiciones");
     } finally {
       setBusy(false);
     }
@@ -1700,6 +1725,48 @@ function App() {
           <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={logout} disabled={busy}>Cerrar sesión</button>
           <small className={mutedTextClass}>{notice}</small>
         </form>
+      </main>
+    );
+  }
+
+  if (!hasAcceptedTerms(user)) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-app p-4 text-ink">
+        <section className="grid max-h-[92vh] w-full max-w-3xl gap-4 overflow-y-auto rounded-lg border border-line bg-white p-5 shadow-sm">
+          <div className="grid gap-2 border-b border-line pb-3">
+            <img className="h-12 w-auto object-contain" src={logoSie} alt="SIE" />
+            <h1 className="text-2xl font-bold">Condiciones de uso de VALCV</h1>
+            <p className="text-sm text-muted">
+              Lee estas condiciones antes de continuar. Al aceptarlas, quedará registrada la constancia asociada a tu usuario.
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm leading-relaxed text-[#25464a]">
+            <p>
+              VALCV es una plataforma tecnológica propietaria creada, administrada y alojada por Delio Siret. El acceso otorgado a usuarios institucionales permite utilizar la plataforma para apoyar procesos de evaluación curricular autorizados, sin transferir propiedad intelectual, código fuente, diseño, configuración, dominio, infraestructura ni derechos de explotación.
+            </p>
+            <p>
+              El uso concedido es temporal, gratuito, limitado, no exclusivo y no transferible. La autorización inicial corresponde al período definido con la institución y podrá ser revisada o redefinida conforme a las condiciones acordadas posteriormente.
+            </p>
+            <p>
+              El usuario se compromete a utilizar la plataforma de forma responsable, mantener confidencialidad sobre la información consultada, no compartir credenciales, no copiar ni intentar replicar la plataforma, y respetar los documentos, datos personales y expedientes a los que tenga acceso.
+            </p>
+            <p>
+              La plataforma apoya el análisis, pero no sustituye las competencias formales de Recursos Humanos ni de las áreas técnicas responsables. La decisión final sobre candidatos permanece bajo responsabilidad humana e institucional.
+            </p>
+            <div className="rounded-md border border-[#cfe0df] bg-[#f8fbfa] px-3 py-2 text-xs text-muted">
+              Versión de condiciones: {TERMS_VERSION}. Al presionar aceptar se guardará la fecha y hora de aceptación en tu cuenta.
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={logout} disabled={busy}>
+              Cerrar sesión
+            </button>
+            <button className={buttonClass} type="button" onClick={acceptTerms} disabled={busy}>
+              <Check size={18} /> He leído y acepto las condiciones
+            </button>
+          </div>
+          <small className={mutedTextClass}>{notice}</small>
+        </section>
       </main>
     );
   }

@@ -178,6 +178,8 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(default=False)
     can_view_all: Mapped[bool] = mapped_column(default=True)
     monthly_ai_quota_usd: Mapped[float] = mapped_column(Float, default=5)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terms_version: Mapped[str] = mapped_column(String(40), default="")
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
