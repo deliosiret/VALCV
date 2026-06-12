@@ -2750,9 +2750,9 @@ function App() {
 	                      </span>
 	                    ) : null}
 	                  </div>
-                  <label className={`${buttonClass} ${!canEvaluateCandidates ? "pointer-events-none opacity-55" : ""}`} title="Cargar PDF o imagen">
+                  <label className={`${buttonClass} ${!canManageCandidates ? "pointer-events-none opacity-55" : ""}`} title="Cargar PDF o imagen">
                     <FileUp size={18} />
-                    <input className="hidden" type="file" multiple disabled={!canEvaluateCandidates} accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />
+                    <input className="hidden" type="file" multiple disabled={!canManageCandidates} accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={uploadFiles} />
                   </label>
                   <button className={buttonClass} onClick={runAi} disabled={busy || selectedCandidate.files.length === 0 || !canEvaluateCandidates} title="Evaluar criterios automáticos con IA">
                     <Bot size={18} /> Evaluar con IA
@@ -2783,7 +2783,7 @@ function App() {
                         className="grid size-5 cursor-pointer place-items-center rounded bg-[#d9e8e6] text-[#25464a] hover:bg-[#c9ddda]"
                         type="button"
                         onClick={() => deleteFile(file.id)}
-                        disabled={busy || !canEvaluateCandidates}
+                        disabled={busy || !canManageCandidates}
                         title="Eliminar documento"
                       >
                         <X size={14} />

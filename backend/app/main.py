@@ -1254,7 +1254,7 @@ def reset_candidate_evaluation(candidate_id: int, _: User = Depends(require_perm
 
 
 @app.post("/candidates/{candidate_id}/files", response_model=CandidateOut)
-def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
+def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...), _: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     save_candidate_uploads(db, candidate, files)
     db.commit()
@@ -1262,7 +1262,7 @@ def upload_candidate_files(candidate_id: int, files: list[UploadFile] = File(...
 
 
 @app.delete("/candidates/{candidate_id}/files/{file_id}", response_model=CandidateOut)
-def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(require_permission("evaluate_candidates")), db: Session = Depends(get_db)):
+def delete_candidate_file(candidate_id: int, file_id: int, _: User = Depends(require_permission("manage_candidates")), db: Session = Depends(get_db)):
     candidate_file = get_candidate_file_or_404(db, candidate_id, file_id)
     delete_uploaded_files([candidate_file])
     db.delete(candidate_file)
