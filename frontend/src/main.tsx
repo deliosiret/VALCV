@@ -99,6 +99,34 @@ function clampWeight(value: number, maxValue = 1) {
   return Math.max(0, Math.min(Number(value) || 0, maxValue));
 }
 
+function rebalanceWeights<T>(
+  rows: T[],
+  targetIndex: number,
+  weightKey: keyof T,
+  rawValue: number,
+  isParticipant: (row: T, index: number) => boolean = () => true
+) {
+  const requested = clampWeight(rawValue);
+  if (!isParticipant(rows[targetIndex], targetIndex)) return rows;
+  const otherIndexes = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => index !== targetIndex && isParticipant(row, index))
+    .map(({ index }) => index);
+  if (!otherIndexes.length) {
+    return rows.map((row, index) => (index === targetIndex ? { ...row, [weightKey]: requested } : row));
+  }
+  const targetOtherTotal = 1 - requested;
+  const currentOtherTotal = otherIndexes.reduce((total, index) => total + (Number(rows[index][weightKey]) || 0), 0);
+  return rows.map((row, index) => {
+    if (index === targetIndex) return { ...row, [weightKey]: requested };
+    if (!otherIndexes.includes(index)) return row;
+    const nextWeight = currentOtherTotal > 0
+      ? targetOtherTotal * ((Number(row[weightKey]) || 0) / currentOtherTotal)
+      : targetOtherTotal / otherIndexes.length;
+    return { ...row, [weightKey]: nextWeight };
+  });
+}
+
 function percentStatus(total: number) {
   const diff = 1 - total;
   const percent = Math.abs(diff) * 100;
@@ -1388,16 +1416,9 @@ function App() {
 
   function updateTemplateCategoryWeight(index: number, rawPercent: string) {
     setTemplateDraft((current) => {
-      const requested = fromPercentInput(rawPercent);
-      const otherTotal = current.categories.reduce((total, category, categoryIndex) =>
-        categoryIndex === index ? total : total + (Number(category.weight) || 0), 0
-      );
-      const maxWeight = Math.max(0, 1 - otherTotal);
       return {
         ...current,
-        categories: current.categories.map((category, categoryIndex) =>
-          categoryIndex === index ? { ...category, weight: clampWeight(requested, maxWeight) } : category
-        ),
+        categories: rebalanceWeights(current.categories, index, "weight", fromPercentInput(rawPercent)),
       };
     });
   }
@@ -1406,15 +1427,14 @@ function App() {
     setTemplateDraft((current) => {
       const criterion = current.criteria[index];
       if (criterion?.is_critical) return current;
-      const requested = fromPercentInput(rawPercent);
-      const otherTotal = current.criteria.reduce((total, row, rowIndex) =>
-        rowIndex === index || row.category !== criterion?.category || row.is_critical ? total : total + (Number(row.within_category_weight) || 0), 0
-      );
-      const maxWeight = Math.max(0, 1 - otherTotal);
       return {
         ...current,
-        criteria: current.criteria.map((row, rowIndex) =>
-          rowIndex === index ? { ...row, within_category_weight: clampWeight(requested, maxWeight) } : row
+        criteria: rebalanceWeights(
+          current.criteria,
+          index,
+          "within_category_weight",
+          fromPercentInput(rawPercent),
+          (row) => row.category === criterion.category && !row.is_critical
         ),
       };
     });
@@ -2513,10 +2533,6 @@ function App() {
                   const weightedChildCriteria = childCriteria.filter((row) => !row.criterion.is_critical);
                   const childTotal = weightedChildCriteria.reduce((total, row) => total + (Number(row.criterion.within_category_weight) || 0), 0);
                   const childStatus = weightedChildCriteria.length ? percentStatus(childTotal) : null;
-                  const categoryOtherTotal = templateDraft.categories.reduce((total, row, index) =>
-                    index === categoryIndex ? total : total + (Number(row.weight) || 0), 0
-                  );
-                  const categoryAvailable = Math.max(0, 1 - categoryOtherTotal - (Number(category.weight) || 0));
                   return (
                     <div className="overflow-hidden rounded-lg border border-[#b9d0cf] bg-white shadow-sm" key={`${category.id ?? "cat"}-${categoryIndex}`}>
                       <div className="grid gap-2 border-b border-[#cfe0df] bg-[#e6f1ef] p-3 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
@@ -2538,7 +2554,7 @@ function App() {
                             onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
                           />
                           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
-                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Libre {toPercentInput(categoryAvailable)}%</small>
+                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Redistribuye el resto</small>
                         </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
                           <Plus size={18} /> Criterio
@@ -2580,9 +2596,7 @@ function App() {
                                   />
                                   <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
                                   <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
-                                    Libre {toPercentInput(Math.max(0, 1 - childCriteria.reduce((total, row) =>
-                                      row.criterionIndex === criterionIndex || row.criterion.is_critical ? total : total + (Number(row.criterion.within_category_weight) || 0), 0
-                                    ) - (Number(criterion.within_category_weight) || 0)))}%
+                                    Redistribuye el resto
                                   </small>
                                 </label>
                               )}
