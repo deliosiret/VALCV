@@ -120,7 +120,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = 
   { value: "administrator", label: "Administrador", description: "Gestiona usuarios, IA, plantillas, candidatos y resultados." },
   { value: "template_manager", label: "Gestor de plantillas", description: "Crea y edita plantillas; consulta resultados." },
   { value: "evaluator", label: "Evaluador", description: "Crea candidatos, carga expedientes y evalúa." },
-  { value: "hr", label: "Recursos Humanos", description: "Crea candidatos, carga expedientes y evalúa." },
+  { value: "hr", label: "Recursos Humanos", description: "Edita plantillas, crea candidatos, carga expedientes y evalúa." },
   { value: "viewer", label: "Consulta", description: "Solo consulta plantillas y resultados." },
 ];
 
@@ -128,7 +128,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   administrator: ["manage_users", "manage_ai_settings", "manage_templates", "manage_candidates", "evaluate_candidates", "view_results"],
   template_manager: ["manage_templates", "view_results"],
   evaluator: ["manage_candidates", "evaluate_candidates", "view_results"],
-  hr: ["manage_candidates", "evaluate_candidates", "view_results"],
+  hr: ["manage_templates", "manage_candidates", "evaluate_candidates", "view_results"],
   viewer: ["view_results"],
 };
 

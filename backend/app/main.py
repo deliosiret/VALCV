@@ -150,7 +150,7 @@ ROLE_PERMISSIONS = {
     },
     UserRole.template_manager: {"manage_templates", "view_results"},
     UserRole.evaluator: {"manage_candidates", "evaluate_candidates", "view_results"},
-    UserRole.hr: {"manage_candidates", "evaluate_candidates", "view_results"},
+    UserRole.hr: {"manage_templates", "manage_candidates", "evaluate_candidates", "view_results"},
     UserRole.viewer: {"view_results"},
 }
 
