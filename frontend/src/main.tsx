@@ -99,31 +99,112 @@ function clampWeight(value: number, maxValue = 1) {
   return Math.max(0, Math.min(Number(value) || 0, maxValue));
 }
 
-function rebalanceWeights<T>(
+type TemplateWeightLocks = {
+  categories: number[];
+  criteria: Record<string, number[]>;
+};
+
+function moveIndexToEnd(order: number[], index: number, maxLength: number) {
+  return [...order.filter((current) => current !== index && current >= 0 && current < maxLength), index];
+}
+
+function integerWeightPoints<T>(rows: T[], weightKey: keyof T, isParticipant: (row: T, index: number) => boolean) {
+  const points = rows.map(() => 0);
+  const participantIndexes = rows.map((row, index) => ({ row, index })).filter(({ row, index }) => isParticipant(row, index)).map(({ index }) => index);
+  if (!participantIndexes.length) return points;
+
+  const rawWeights = participantIndexes.map((index) => Math.max(0, Number(rows[index][weightKey]) || 0));
+  const rawTotal = rawWeights.reduce((total, value) => total + value, 0);
+  if (rawTotal <= 0) {
+    const base = Math.floor(100 / participantIndexes.length);
+    let remainder = 100 - base * participantIndexes.length;
+    participantIndexes.forEach((index) => {
+      points[index] = base + (remainder > 0 ? 1 : 0);
+      remainder -= 1;
+    });
+    return points;
+  }
+
+  const normalized = participantIndexes.map((index) => {
+    const exact = ((Number(rows[index][weightKey]) || 0) / rawTotal) * 100;
+    return { index, floor: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  normalized.forEach((row) => {
+    points[row.index] = row.floor;
+  });
+  let remainder = 100 - normalized.reduce((total, row) => total + row.floor, 0);
+  normalized
+    .slice()
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+    .forEach((row) => {
+      if (remainder <= 0) return;
+      points[row.index] += 1;
+      remainder -= 1;
+    });
+  return points;
+}
+
+function rebalanceIntegerPercentWeights<T>(
   rows: T[],
   targetIndex: number,
   weightKey: keyof T,
   rawValue: number,
+  lockOrder: number[],
   isParticipant: (row: T, index: number) => boolean = () => true
 ) {
-  const requested = clampWeight(rawValue);
+  const requested = Math.round(clampWeight(rawValue) * 100);
   if (!isParticipant(rows[targetIndex], targetIndex)) return rows;
-  const otherIndexes = rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row, index }) => index !== targetIndex && isParticipant(row, index))
-    .map(({ index }) => index);
-  if (!otherIndexes.length) {
-    return rows.map((row, index) => (index === targetIndex ? { ...row, [weightKey]: requested } : row));
+
+  const points = integerWeightPoints(rows, weightKey, isParticipant);
+  const recipientIndexes = [
+    ...rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row, index }) => index !== targetIndex && isParticipant(row, index) && !lockOrder.includes(index))
+      .map(({ index }) => index),
+    ...lockOrder.filter((index) => index !== targetIndex && rows[index] && isParticipant(rows[index], index)),
+  ];
+  if (!recipientIndexes.length) {
+    return rows.map((row, index) => (index === targetIndex ? { ...row, [weightKey]: requested / 100 } : row));
   }
-  const targetOtherTotal = 1 - requested;
-  const currentOtherTotal = otherIndexes.reduce((total, index) => total + (Number(rows[index][weightKey]) || 0), 0);
+
+  const delta = requested - points[targetIndex];
+  points[targetIndex] = requested;
+  let recipientCursor = 0;
+  const movePoint = delta > 0
+    ? () => {
+        for (let attempt = 0; attempt < recipientIndexes.length; attempt += 1) {
+          const index = recipientIndexes[recipientCursor % recipientIndexes.length];
+          recipientCursor += 1;
+          if (points[index] > 0) {
+            points[index] -= 1;
+            return true;
+          }
+        }
+        return false;
+      }
+    : () => {
+        const index = recipientIndexes[recipientCursor % recipientIndexes.length];
+        recipientCursor += 1;
+        points[index] += 1;
+        return true;
+      };
+
+  for (let step = 0; step < Math.abs(delta); step += 1) {
+    if (!movePoint()) {
+      points[targetIndex] += delta > 0 ? -1 : 1;
+      break;
+    }
+  }
+
+  const participantTotal = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => isParticipant(row, index))
+    .reduce((total, { index }) => total + points[index], 0);
+  if (participantTotal !== 100) points[targetIndex] += 100 - participantTotal;
+
   return rows.map((row, index) => {
-    if (index === targetIndex) return { ...row, [weightKey]: requested };
-    if (!otherIndexes.includes(index)) return row;
-    const nextWeight = currentOtherTotal > 0
-      ? targetOtherTotal * ((Number(row[weightKey]) || 0) / currentOtherTotal)
-      : targetOtherTotal / otherIndexes.length;
-    return { ...row, [weightKey]: nextWeight };
+    if (!isParticipant(row, index)) return row;
+    return { ...row, [weightKey]: points[index] / 100 };
   });
 }
 
@@ -727,6 +808,7 @@ function App() {
   const [templateAiFile, setTemplateAiFile] = React.useState<File | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = React.useState(false);
   const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>(blankTemplateDraft());
+  const templateWeightLocksRef = React.useRef<TemplateWeightLocks>({ categories: [], criteria: {} });
   const [notice, setNotice] = React.useState("Listo");
   const [busy, setBusy] = React.useState(false);
 
@@ -1338,6 +1420,7 @@ function App() {
   }
 
   function openTemplateEditor(action: "new" | "edit" | "duplicate") {
+    templateWeightLocksRef.current = { categories: [], criteria: {} };
     if (action === "new" || !selectedTemplate) {
       setTemplateDraft(blankTemplateDraft());
     } else {
@@ -1380,6 +1463,7 @@ function App() {
         categories: generated.categories.map((category, index) => ({ ...category, id: undefined, order_index: index })),
         criteria: generated.criteria.map((criterion, index) => ({ ...criterion, id: undefined, order_index: index })),
       });
+      templateWeightLocksRef.current = { categories: [], criteria: {} };
       setTemplateStartOpen(false);
       setTemplateEditorOpen(true);
       setNotice("Borrador de plantilla generado con IA. Revísalo antes de guardar.");
@@ -1415,25 +1499,41 @@ function App() {
   }
 
   function updateTemplateCategoryWeight(index: number, rawPercent: string) {
+    const lockOrder = templateWeightLocksRef.current.categories;
+    templateWeightLocksRef.current = {
+      ...templateWeightLocksRef.current,
+      categories: moveIndexToEnd(lockOrder, index, templateDraft.categories.length),
+    };
     setTemplateDraft((current) => {
       return {
         ...current,
-        categories: rebalanceWeights(current.categories, index, "weight", fromPercentInput(rawPercent)),
+        categories: rebalanceIntegerPercentWeights(current.categories, index, "weight", fromPercentInput(rawPercent), lockOrder),
       };
     });
   }
 
   function updateTemplateCriterionWeight(index: number, rawPercent: string) {
+    const criterionForLock = templateDraft.criteria[index];
+    const lockKey = criterionForLock?.category ?? "";
+    const lockOrder = templateWeightLocksRef.current.criteria[lockKey] ?? [];
+    templateWeightLocksRef.current = {
+      ...templateWeightLocksRef.current,
+      criteria: {
+        ...templateWeightLocksRef.current.criteria,
+        [lockKey]: moveIndexToEnd(lockOrder, index, templateDraft.criteria.length),
+      },
+    };
     setTemplateDraft((current) => {
       const criterion = current.criteria[index];
       if (criterion?.is_critical) return current;
       return {
         ...current,
-        criteria: rebalanceWeights(
+        criteria: rebalanceIntegerPercentWeights(
           current.criteria,
           index,
           "within_category_weight",
           fromPercentInput(rawPercent),
+          lockOrder,
           (row) => row.category === criterion.category && !row.is_critical
         ),
       };
@@ -1449,6 +1549,7 @@ function App() {
 
   function distributeTemplateWeights() {
     setTemplateDraft((current) => normalizeWeightsEvenly(current));
+    templateWeightLocksRef.current = { categories: [], criteria: {} };
     setNotice("Pesos distribuidos automáticamente.");
   }
 
@@ -2554,7 +2655,7 @@ function App() {
                             onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
                           />
                           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
-                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Redistribuye el resto</small>
+                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Redistribuye en puntos enteros</small>
                         </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
                           <Plus size={18} /> Criterio
@@ -2596,7 +2697,7 @@ function App() {
                                   />
                                   <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
                                   <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
-                                    Redistribuye el resto
+                                    Redistribuye en puntos enteros
                                   </small>
                                 </label>
                               )}
