@@ -156,43 +156,40 @@ function rebalanceIntegerPercentWeights<T>(
   if (!isParticipant(rows[targetIndex], targetIndex)) return rows;
 
   const points = integerWeightPoints(rows, weightKey, isParticipant);
-  const recipientIndexes = [
-    ...rows
-      .map((row, index) => ({ row, index }))
-      .filter(({ row, index }) => index !== targetIndex && isParticipant(row, index) && !lockOrder.includes(index))
-      .map(({ index }) => index),
-    ...lockOrder.filter((index) => index !== targetIndex && rows[index] && isParticipant(rows[index], index)),
-  ];
-  if (!recipientIndexes.length) {
+  const unlockedRecipientIndexes = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => index !== targetIndex && isParticipant(row, index) && !lockOrder.includes(index))
+    .map(({ index }) => index);
+  const lockedRecipientIndexes = lockOrder.filter((index) => index !== targetIndex && rows[index] && isParticipant(rows[index], index));
+  if (!unlockedRecipientIndexes.length && !lockedRecipientIndexes.length) {
     return rows.map((row, index) => (index === targetIndex ? { ...row, [weightKey]: requested / 100 } : row));
   }
 
   const delta = requested - points[targetIndex];
   points[targetIndex] = requested;
-  let recipientCursor = 0;
-  const movePoint = delta > 0
-    ? () => {
-        for (let attempt = 0; attempt < recipientIndexes.length; attempt += 1) {
-          const index = recipientIndexes[recipientCursor % recipientIndexes.length];
-          recipientCursor += 1;
-          if (points[index] > 0) {
-            points[index] -= 1;
-            return true;
-          }
-        }
-        return false;
-      }
-    : () => {
-        const index = recipientIndexes[recipientCursor % recipientIndexes.length];
-        recipientCursor += 1;
-        points[index] += 1;
-        return true;
-      };
+  let remaining = Math.abs(delta);
 
-  for (let step = 0; step < Math.abs(delta); step += 1) {
-    if (!movePoint()) {
-      points[targetIndex] += delta > 0 ? -1 : 1;
-      break;
+  if (delta > 0) {
+    const subtractFrom = (indexes: number[]) => {
+      let cursor = 0;
+      while (remaining > 0 && indexes.some((index) => points[index] > 0)) {
+        for (let attempt = 0; attempt < indexes.length && remaining > 0; attempt += 1) {
+          const index = indexes[cursor % indexes.length];
+          cursor += 1;
+          if (points[index] <= 0) continue;
+          points[index] -= 1;
+          remaining -= 1;
+        }
+      }
+    };
+    subtractFrom(unlockedRecipientIndexes);
+    if (remaining > 0) subtractFrom(lockedRecipientIndexes);
+    if (remaining > 0) points[targetIndex] -= remaining;
+  } else if (delta < 0) {
+    const addTargets = unlockedRecipientIndexes.length ? unlockedRecipientIndexes : lockedRecipientIndexes;
+    for (let step = 0; step < remaining; step += 1) {
+      const index = addTargets[step % addTargets.length];
+      points[index] += 1;
     }
   }
 
