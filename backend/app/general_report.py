@@ -10,6 +10,7 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas as reportlab_canvas
 from reportlab.platypus import (
     Flowable,
     Image,
@@ -159,6 +160,31 @@ class AccentRule(Flowable):
         self.canv.roundRect(0, 0, self.width, self.height, 2, fill=1, stroke=0)
 
 
+class NumberedCanvas(reportlab_canvas.Canvas):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(total_pages)
+            super().showPage()
+        super().save()
+
+    def draw_page_number(self, total_pages: int):
+        if self._pageNumber == 1:
+            return
+        self.setFont("Helvetica", 7.5)
+        self.setFillColor(MUTED)
+        self.drawRightString(letter[0] - 0.72 * inch, 0.37 * inch, f"Página {self._pageNumber} de {total_pages}")
+
+
 def make_styles():
     base = getSampleStyleSheet()
     base.add(ParagraphStyle("CoverEyebrow", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=TEAL, alignment=TA_LEFT, spaceAfter=8))
@@ -260,7 +286,6 @@ def add_footer(canvas, doc):
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(MUTED)
     canvas.drawString(doc.leftMargin, 0.37 * inch, "Reporte general de evaluación curricular")
-    canvas.drawRightString(letter[0] - doc.rightMargin, 0.37 * inch, f"Página {doc.page}")
     canvas.restoreState()
 
 
@@ -647,10 +672,10 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=0.55 * inch,
-        leftMargin=0.55 * inch,
-        topMargin=0.55 * inch,
-        bottomMargin=0.72 * inch,
+        rightMargin=0.72 * inch,
+        leftMargin=0.72 * inch,
+        topMargin=0.68 * inch,
+        bottomMargin=0.82 * inch,
         title=f"Reporte general - {template.name}",
     )
     doc.preliminary = preliminary
@@ -664,6 +689,6 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     story.extend(criterion_matrix_story(styles, candidates, criteria, aliases))
     story.extend(participant_profiles_story(styles, candidates, criteria))
     story.extend(synthesis_story(styles, template, summaries, preliminary, narrative))
-    doc.build(story, onFirstPage=add_cover_page, onLaterPages=add_footer)
+    doc.build(story, onFirstPage=add_cover_page, onLaterPages=add_footer, canvasmaker=NumberedCanvas)
     buffer.seek(0)
     return buffer
