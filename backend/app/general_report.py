@@ -36,6 +36,10 @@ INK = colors.HexColor("#1d2f32")
 GOLD = colors.HexColor("#d69b2d")
 RED = colors.HexColor("#9a3412")
 LIGHT_RED = colors.HexColor("#fff1ed")
+PAPER = colors.HexColor("#f7faf9")
+WHITE = colors.white
+DEEP_BLUE = colors.HexColor("#18383d")
+PALE_BLUE = colors.HexColor("#edf6f5")
 
 
 def compact_number(value: float, decimals: int = 2) -> str:
@@ -143,10 +147,30 @@ class HorizontalBar(Flowable):
         self.canv.roundRect(0, 0, self.width * self.value, self.height, 4, fill=1, stroke=0)
 
 
+class AccentRule(Flowable):
+    def __init__(self, width: float = 1.2 * inch, height: float = 0.07 * inch, fill=GOLD):
+        super().__init__()
+        self.width = width
+        self.height = height
+        self.fill = fill
+
+    def draw(self):
+        self.canv.setFillColor(self.fill)
+        self.canv.roundRect(0, 0, self.width, self.height, 2, fill=1, stroke=0)
+
+
 def make_styles():
     base = getSampleStyleSheet()
-    base.add(ParagraphStyle("CoverTitle", parent=base["Title"], fontName="Helvetica-Bold", fontSize=24, leading=28, textColor=BLUE, alignment=TA_CENTER, spaceAfter=10))
-    base.add(ParagraphStyle("CoverSub", parent=base["Normal"], fontName="Helvetica", fontSize=12, leading=17, textColor=MUTED, alignment=TA_CENTER, spaceAfter=8))
+    base.add(ParagraphStyle("CoverEyebrow", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=TEAL, alignment=TA_LEFT, spaceAfter=8))
+    base.add(ParagraphStyle("CoverTitle", parent=base["Title"], fontName="Helvetica-Bold", fontSize=28, leading=31, textColor=DEEP_BLUE, alignment=TA_LEFT, spaceAfter=8))
+    base.add(ParagraphStyle("CoverProfile", parent=base["Normal"], fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=BLUE, alignment=TA_LEFT, spaceAfter=8))
+    base.add(ParagraphStyle("CoverSub", parent=base["Normal"], fontName="Helvetica", fontSize=9.5, leading=13, textColor=MUTED, alignment=TA_LEFT, spaceAfter=4))
+    base.add(ParagraphStyle("CoverMeta", parent=base["Normal"], fontName="Helvetica", fontSize=8, leading=10.5, textColor=WHITE, alignment=TA_RIGHT, spaceAfter=2))
+    base.add(ParagraphStyle("CoverIntro", parent=base["BodyText"], fontName="Helvetica", fontSize=10, leading=14, textColor=INK, alignment=TA_JUSTIFY, spaceAfter=0))
+    base.add(ParagraphStyle("CoverKpi", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=20, leading=22, textColor=TEAL, alignment=TA_CENTER))
+    base.add(ParagraphStyle("CoverKpiLabel", parent=base["BodyText"], fontName="Helvetica", fontSize=8.2, leading=10, textColor=MUTED, alignment=TA_CENTER))
+    base.add(ParagraphStyle("CoverFooterTitle", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=9.2, leading=11.5, textColor=BLUE, alignment=TA_LEFT))
+    base.add(ParagraphStyle("CoverFooterText", parent=base["BodyText"], fontName="Helvetica", fontSize=8, leading=10.5, textColor=MUTED, alignment=TA_LEFT))
     base.add(ParagraphStyle("H1x", parent=base["Heading1"], fontName="Helvetica-Bold", fontSize=16, leading=20, textColor=BLUE, spaceBefore=8, spaceAfter=8))
     base.add(ParagraphStyle("H2x", parent=base["Heading2"], fontName="Helvetica-Bold", fontSize=12, leading=15, textColor=TEAL, spaceBefore=7, spaceAfter=5))
     base.add(ParagraphStyle("Bodyx", parent=base["BodyText"], fontName="Helvetica", fontSize=9.5, leading=13.2, textColor=INK, alignment=TA_JUSTIFY, spaceAfter=6))
@@ -183,6 +207,32 @@ def table(data, col_widths, style_commands=None):
     return result
 
 
+def add_cover_page(canvas, doc):
+    canvas.saveState()
+    width, height = letter
+    canvas.setFillColor(PAPER)
+    canvas.rect(0, 0, width, height, fill=1, stroke=0)
+    canvas.setFillColor(DEEP_BLUE)
+    canvas.rect(0, height - 1.05 * inch, width, 1.05 * inch, fill=1, stroke=0)
+    canvas.setFillColor(TEAL)
+    canvas.rect(0, height - 1.19 * inch, width, 0.14 * inch, fill=1, stroke=0)
+    canvas.setFillColor(GOLD)
+    canvas.rect(0.55 * inch, height - 1.19 * inch, 1.25 * inch, 0.14 * inch, fill=1, stroke=0)
+    canvas.setStrokeColor(colors.HexColor("#dce9e7"))
+    canvas.setLineWidth(0.7)
+    canvas.roundRect(0.55 * inch, 1.25 * inch, width - 1.1 * inch, 5.62 * inch, 10, fill=0, stroke=1)
+    canvas.setFillColor(colors.HexColor("#fbfdfd"))
+    canvas.roundRect(0.72 * inch, 1.52 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
+    canvas.setFillColor(colors.HexColor("#eaf4f2"))
+    canvas.roundRect(width - 2.25 * inch, 1.48 * inch, 1.7 * inch, 1.7 * inch, 18, fill=1, stroke=0)
+    canvas.setFillColor(colors.HexColor("#dcece9"))
+    canvas.circle(width - 0.75 * inch, 0.92 * inch, 0.58 * inch, fill=1, stroke=0)
+    canvas.setFont("Helvetica", 7.5)
+    canvas.setFillColor(MUTED)
+    canvas.drawRightString(width - doc.rightMargin, 0.37 * inch, f"Página {doc.page}")
+    canvas.restoreState()
+
+
 def add_footer(canvas, doc):
     canvas.saveState()
     canvas.setStrokeColor(LINE)
@@ -195,36 +245,83 @@ def add_footer(canvas, doc):
 
 
 def cover_story(styles, template: Template, candidates: list[Candidate], preliminary: bool):
-    story = []
+    story = [Spacer(1, 0.18 * inch)]
+    generated_at = datetime.now().strftime("%d/%m/%Y · %H:%M")
+    status_text = "Valoración preliminar" if preliminary else "Valoración completa"
+    logo_block = []
     if LOGO_PATH.exists():
-        story.append(Image(str(LOGO_PATH), width=1.85 * inch, height=0.75 * inch, kind="proportional"))
-        story.append(Spacer(1, 0.22 * inch))
-    story.append(Paragraph("Reporte general de evaluación curricular", styles["CoverTitle"]))
-    story.append(Paragraph(f"Perfil evaluado: <b>{safe(template.name)}</b>", styles["CoverSub"]))
-    story.append(Paragraph(datetime.now().strftime("Generado el %d/%m/%Y a las %H:%M"), styles["CoverSub"]))
-    story.append(Spacer(1, 0.18 * inch))
+        logo_block.append(Image(str(LOGO_PATH), width=1.65 * inch, height=0.58 * inch, kind="proportional"))
+    logo_block.append(Paragraph("Superintendencia de Electricidad", styles["CoverSub"]))
+    meta_block = [
+        Paragraph(status_text, styles["CoverMeta"]),
+        Paragraph(f"Generado: {generated_at}", styles["CoverMeta"]),
+    ]
+    header = Table([[logo_block, meta_block]], colWidths=[3.75 * inch, 2.75 * inch], hAlign="LEFT")
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(header)
+    story.append(Spacer(1, 0.8 * inch))
+    story.append(Paragraph("REPORTE GENERAL DE EVALUACIÓN CURRICULAR", styles["CoverEyebrow"]))
+    story.append(Paragraph("Evaluación comparativa de participantes", styles["CoverTitle"]))
+    story.append(AccentRule())
+    story.append(Spacer(1, 0.16 * inch))
+    story.append(Paragraph(f"Perfil evaluado: {safe(template.name)}", styles["CoverProfile"]))
     intro = (
         "Este informe presenta una lectura comparativa del concurso a partir de la estructura de evaluación definida para el perfil, "
         "los participantes registrados y las puntuaciones disponibles. Su propósito es facilitar una revisión ejecutiva, clara y "
         "ordenada de fortalezas, brechas y resultados preliminares o finales según el estado de avance de la evaluación."
     )
-    story.append(Paragraph(intro, styles["Bodyx"]))
+    intro_box = Table([[Paragraph(intro, styles["CoverIntro"])]], colWidths=[5.35 * inch], hAlign="LEFT")
+    intro_box.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(intro_box)
+    story.append(Spacer(1, 0.22 * inch))
     if preliminary:
         story.append(Paragraph("Valoración preliminar: existen criterios o participantes con puntuaciones pendientes. Las conclusiones deben leerse como una fotografía de avance y no como cierre definitivo del proceso.", styles["Note"]))
 
     kpis = [
-        [Paragraph(str(len(candidates)), styles["Kpi"]), Paragraph(str(len(template.categories)), styles["Kpi"]), Paragraph(str(len(template.criteria)), styles["Kpi"])],
-        [Paragraph("Participantes", styles["KpiLabel"]), Paragraph("Categorías", styles["KpiLabel"]), Paragraph("Criterios", styles["KpiLabel"])],
+        [Paragraph(str(len(candidates)), styles["CoverKpi"]), Paragraph(str(len(template.categories)), styles["CoverKpi"]), Paragraph(str(len(template.criteria)), styles["CoverKpi"])],
+        [Paragraph("Participantes", styles["CoverKpiLabel"]), Paragraph("Categorías", styles["CoverKpiLabel"]), Paragraph("Criterios", styles["CoverKpiLabel"])],
     ]
-    kpi_table = Table(kpis, colWidths=[1.55 * inch, 1.55 * inch, 1.55 * inch], hAlign="CENTER")
+    kpi_table = Table(kpis, colWidths=[1.52 * inch, 1.52 * inch, 1.52 * inch], hAlign="LEFT")
     kpi_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fbfa")),
-        ("BOX", (0, 0), (-1, -1), 0.6, LINE),
-        ("INNERGRID", (0, 0), (-1, -1), 0.35, LINE),
+        ("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE),
+        ("BOX", (0, 0), (-1, -1), 0.7, LINE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, WHITE),
         ("TOPPADDING", (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
     story.append(kpi_table)
+    story.append(Spacer(1, 0.8 * inch))
+    footer_card = Table(
+        [[
+            Paragraph("Documento de apoyo a la decisión", styles["CoverFooterTitle"]),
+            Paragraph("Uso institucional · Evaluación curricular comparativa", styles["CoverFooterText"]),
+        ]],
+        colWidths=[2.35 * inch, 3.1 * inch],
+        hAlign="LEFT",
+    )
+    footer_card.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+        ("BOX", (0, 0), (-1, -1), 0.45, LINE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+    ]))
+    story.append(footer_card)
     story.append(PageBreak())
     return story
 
@@ -553,6 +650,6 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     story.extend(criterion_matrix_story(styles, candidates, criteria, aliases))
     story.extend(participant_profiles_story(styles, candidates, criteria))
     story.extend(synthesis_story(styles, template, summaries, preliminary, narrative))
-    doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
+    doc.build(story, onFirstPage=add_cover_page, onLaterPages=add_footer)
     buffer.seek(0)
     return buffer
