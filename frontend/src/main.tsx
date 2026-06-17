@@ -2640,18 +2640,20 @@ function App() {
                         </label>
                         <label className="relative">
                           <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-normal text-brand">Peso de categoría</span>
-                          <input
-                            className={`${inputClass} pr-7`}
-                            type="number"
-                            step="1"
-                            min="0"
-                            max="100"
-                            placeholder="Peso"
-                            value={toPercentInput(category.weight)}
-                            onWheel={ignoreNumberWheel}
-                            onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
-                          />
-                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                          <div className="relative">
+                            <input
+                              className={`${inputClass} pr-7`}
+                              type="number"
+                              step="1"
+                              min="0"
+                              max="100"
+                              placeholder="Peso"
+                              value={toPercentInput(category.weight)}
+                              onWheel={ignoreNumberWheel}
+                              onChange={(event) => updateTemplateCategoryWeight(categoryIndex, event.target.value)}
+                            />
+                            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm font-semibold text-muted">%</span>
+                          </div>
                           <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Redistribuye en puntos enteros</small>
                         </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
@@ -2681,18 +2683,20 @@ function App() {
                                 </div>
                               ) : (
                                 <label className="relative">
-                                  <input
-                                    className={`${inputClass} pr-7`}
-                                    type="number"
-                                    step="1"
-                                    min="0"
-                                    max="100"
-                                    placeholder="Peso del criterio"
-                                    value={toPercentInput(criterion.within_category_weight)}
-                                    onWheel={ignoreNumberWheel}
-                                    onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
-                                  />
-                                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">%</span>
+                                  <div className="relative">
+                                    <input
+                                      className={`${inputClass} pr-7`}
+                                      type="number"
+                                      step="1"
+                                      min="0"
+                                      max="100"
+                                      placeholder="Peso del criterio"
+                                      value={toPercentInput(criterion.within_category_weight)}
+                                      onWheel={ignoreNumberWheel}
+                                      onChange={(event) => updateTemplateCriterionWeight(criterionIndex, event.target.value)}
+                                    />
+                                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm font-semibold text-muted">%</span>
+                                  </div>
                                   <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
                                     Redistribuye en puntos enteros
                                   </small>
