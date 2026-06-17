@@ -211,31 +211,46 @@ def table(data, col_widths, style_commands=None):
 def add_cover_page(canvas, doc):
     canvas.saveState()
     width, height = letter
-    canvas.setFillColor(PAPER)
-    canvas.rect(0, 0, width, height, fill=1, stroke=0)
-    canvas.setFillColor(DEEP_BLUE)
-    canvas.rect(0, height - 1.05 * inch, width, 1.05 * inch, fill=1, stroke=0)
-    canvas.setFillColor(TEAL)
-    canvas.rect(0, height - 1.19 * inch, width, 0.14 * inch, fill=1, stroke=0)
-    canvas.setFillColor(GOLD)
-    canvas.rect(0.55 * inch, height - 1.19 * inch, 1.25 * inch, 0.14 * inch, fill=1, stroke=0)
-    if LOGO_PATH.exists():
-        canvas.drawImage(str(LOGO_PATH), 0.62 * inch, height - 0.87 * inch, width=1.52 * inch, height=0.52 * inch, preserveAspectRatio=True, mask="auto")
-    canvas.setFont("Helvetica", 8.5)
     canvas.setFillColor(WHITE)
-    canvas.drawString(0.62 * inch, height - 0.98 * inch, "Superintendencia de Electricidad")
+    canvas.rect(0, 0, width, height, fill=1, stroke=0)
+
+    canvas.setFillColor(PAPER)
+    canvas.rect(0.18 * inch, 1.0 * inch, width - 0.18 * inch, height - 2.0 * inch, fill=1, stroke=0)
+    canvas.setFillColor(DEEP_BLUE)
+    canvas.rect(0, 0, 0.18 * inch, height, fill=1, stroke=0)
+    canvas.setFillColor(TEAL)
+    canvas.rect(0.18 * inch, 0, 0.05 * inch, height, fill=1, stroke=0)
+    canvas.setFillColor(GOLD)
+    canvas.rect(0.72 * inch, height - 1.42 * inch, 1.65 * inch, 0.06 * inch, fill=1, stroke=0)
+
+    if LOGO_PATH.exists():
+        canvas.drawImage(str(LOGO_PATH), 0.72 * inch, height - 1.04 * inch, width=1.85 * inch, height=0.62 * inch, preserveAspectRatio=True, mask="auto")
+    canvas.setFont("Helvetica", 8.2)
+    canvas.setFillColor(MUTED)
+    canvas.drawString(0.72 * inch, height - 1.22 * inch, "Superintendencia de Electricidad")
+
     canvas.setFont("Helvetica", 8)
-    canvas.drawRightString(width - 0.82 * inch, height - 0.58 * inch, "Valoración preliminar" if getattr(doc, "preliminary", False) else "Valoración completa")
-    canvas.drawRightString(width - 0.82 * inch, height - 0.78 * inch, f"Generado: {getattr(doc, 'generated_at', '')}")
-    canvas.setStrokeColor(colors.HexColor("#dce9e7"))
+    canvas.setFillColor(DEEP_BLUE)
+    canvas.drawRightString(width - 0.72 * inch, height - 0.72 * inch, "Valoración preliminar" if getattr(doc, "preliminary", False) else "Valoración completa")
+    canvas.setFillColor(MUTED)
+    canvas.drawRightString(width - 0.72 * inch, height - 0.92 * inch, f"Generado: {getattr(doc, 'generated_at', '')}")
+
+    canvas.setStrokeColor(colors.HexColor("#d8e7e5"))
     canvas.setLineWidth(0.7)
-    canvas.roundRect(0.55 * inch, 1.25 * inch, width - 1.1 * inch, 5.62 * inch, 10, fill=0, stroke=1)
+    canvas.line(0.72 * inch, height - 1.52 * inch, width - 0.72 * inch, height - 1.52 * inch)
+
+    canvas.setFillColor(WHITE)
+    canvas.roundRect(0.72 * inch, 1.22 * inch, width - 1.44 * inch, 5.62 * inch, 12, fill=1, stroke=0)
+    canvas.setStrokeColor(colors.HexColor("#dce9e7"))
+    canvas.roundRect(0.72 * inch, 1.22 * inch, width - 1.44 * inch, 5.62 * inch, 12, fill=0, stroke=1)
+
     canvas.setFillColor(colors.HexColor("#fbfdfd"))
-    canvas.roundRect(0.72 * inch, 1.52 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
+    canvas.roundRect(0.88 * inch, 1.48 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#eaf4f2"))
-    canvas.roundRect(width - 2.25 * inch, 1.48 * inch, 1.7 * inch, 1.7 * inch, 18, fill=1, stroke=0)
+    canvas.roundRect(width - 2.15 * inch, 1.48 * inch, 1.45 * inch, 1.45 * inch, 18, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#dcece9"))
-    canvas.circle(width - 0.75 * inch, 0.92 * inch, 0.58 * inch, fill=1, stroke=0)
+    canvas.circle(width - 0.72 * inch, 0.88 * inch, 0.48 * inch, fill=1, stroke=0)
+
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(MUTED)
     canvas.drawRightString(width - doc.rightMargin, 0.37 * inch, f"Página {doc.page}")
@@ -254,7 +269,7 @@ def add_footer(canvas, doc):
 
 
 def cover_story(styles, template: Template, candidates: list[Candidate], preliminary: bool):
-    story = [Spacer(1, 1.28 * inch)]
+    story = [Spacer(1, 1.48 * inch)]
     story.append(Paragraph("REPORTE GENERAL DE EVALUACIÓN CURRICULAR", styles["CoverEyebrow"]))
     story.append(Paragraph("Evaluación comparativa de participantes", styles["CoverTitle"]))
     story.append(AccentRule())
@@ -277,7 +292,19 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
     story.append(intro_box)
     story.append(Spacer(1, 0.22 * inch))
     if preliminary:
-        story.append(Paragraph("Valoración preliminar: existen criterios o participantes con puntuaciones pendientes. Las conclusiones deben leerse como una fotografía de avance y no como cierre definitivo del proceso.", styles["Note"]))
+        note_box = Table(
+            [[Paragraph("Valoración preliminar: existen criterios o participantes con puntuaciones pendientes. Las conclusiones deben leerse como una fotografía de avance y no como cierre definitivo del proceso.", styles["Note"])]],
+            colWidths=[5.9 * inch],
+            hAlign="LEFT",
+        )
+        note_box.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(note_box)
+        story.append(Spacer(1, 0.08 * inch))
 
     kpis = [
         [Paragraph(str(len(candidates)), styles["CoverKpi"]), Paragraph(str(len(template.categories)), styles["CoverKpi"]), Paragraph(str(len(template.criteria)), styles["CoverKpi"])],
