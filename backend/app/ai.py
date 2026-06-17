@@ -344,6 +344,7 @@ def generate_general_report_narrative_with_gemini(
         "Usa como insumo todo el contenido estructurado del informe que se suministra más abajo. "
         "No inventes datos, participantes, puntuaciones, documentos ni decisiones. "
         "No uses lenguaje técnico sobre la plataforma, plantillas, IA, prompts, logs o automatización. "
+        "Cuando menciones participantes, usa siempre sus nombres completos; no uses referencias abreviadas ni letras sueltas. "
         "Si la evaluación está incompleta, expresa claramente que la valoración no es concluyente y que debe completarse antes del cierre. "
         "Mantén un tono profesional, institucional, sobrio y fácil de leer para Recursos Humanos y el área técnica. "
         "Devuelve únicamente JSON válido con la forma "

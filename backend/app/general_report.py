@@ -50,14 +50,16 @@ def score_text(value: float | None) -> str:
     return "Pendiente" if value is None else f"{compact_number(value, 1)}/5"
 
 
-def critical_score_text(value: float | None) -> str:
+def critical_score_text(value: float | None, pending_text: str = "Pendiente") -> str:
     if value is None:
-        return "Pendiente"
+        return pending_text
     return "Cumple" if value >= 5 else "No cumple"
 
 
-def criterion_score_text(criterion: Criterion, value: float | None) -> str:
-    return critical_score_text(value) if criterion.is_critical else score_text(value)
+def criterion_score_text(criterion: Criterion, value: float | None, pending_text: str = "Pendiente") -> str:
+    if criterion.is_critical:
+        return critical_score_text(value, pending_text)
+    return pending_text if value is None else score_text(value)
 
 
 def alias_name(index: int) -> str:
@@ -71,8 +73,8 @@ def alias_name(index: int) -> str:
     return letters
 
 
-def candidate_label(code: str) -> str:
-    return f"Candidato {code}"
+def candidate_name_by_id(candidates: list[Candidate]) -> dict[int, str]:
+    return {candidate.id: candidate.name for candidate in candidates}
 
 
 def participant_aliases(candidates: list[Candidate]) -> dict[int, str]:
@@ -255,18 +257,18 @@ def participant_directory_story(styles, candidates: list[Candidate], aliases: di
         story.append(PageBreak())
         return story
     story.append(Paragraph(
-        "Para facilitar la lectura de tablas y gráficos, el informe utiliza referencias abreviadas. La correspondencia completa se presenta únicamente en esta sección.",
+        "Para facilitar la lectura de tablas comparativas donde los participantes aparecen como columnas, el informe utiliza referencias abreviadas. La correspondencia completa se presenta en esta sección.",
         styles["Bodyx"],
     ))
     rows = [[Paragraph("Referencia", styles["TableHeader"]), Paragraph("Participante", styles["TableHeader"])]]
     for candidate in candidates:
-        rows.append([Paragraph(candidate_label(aliases[candidate.id]), styles["TableCell"]), Paragraph(safe(candidate.name), styles["TableCell"])])
+        rows.append([Paragraph(aliases[candidate.id], styles["TableCell"]), Paragraph(safe(candidate.name), styles["TableCell"])])
     story.append(table(rows, [1.2 * inch, 5.1 * inch]))
     story.append(PageBreak())
     return story
 
 
-def ranking_story(styles, template: Template, summaries: list[dict], preliminary: bool, aliases: dict[int, str]):
+def ranking_story(styles, template: Template, summaries: list[dict], preliminary: bool, candidates: list[Candidate]):
     story = [Paragraph("Resultados comparativos", styles["H1x"])]
     if not summaries:
         story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
@@ -278,12 +280,13 @@ def ranking_story(styles, template: Template, summaries: list[dict], preliminary
     ))
     if preliminary:
         story.append(Paragraph("El ranking es preliminar porque no todas las puntuaciones están completas.", styles["Note"]))
+    candidate_names = candidate_name_by_id(candidates)
     rows = [[Paragraph("Pos.", styles["TableHeader"]), Paragraph("Participante", styles["TableHeader"]), Paragraph("Resultado", styles["TableHeader"]), Paragraph("Visual", styles["TableHeader"]), Paragraph("Lectura", styles["TableHeader"])]]
     for index, summary in enumerate(summaries, start=1):
         rec = clean_recommendation(summary["recommendation"])
         rows.append([
             Paragraph(str(index), styles["TableCell"]),
-            Paragraph(candidate_label(aliases.get(summary["id"], "")), styles["TableCell"]),
+            Paragraph(safe(candidate_names.get(summary["id"], "Participante")), styles["TableCell"]),
             Paragraph(percent(summary["global_score"]), styles["TableRight"]),
             HorizontalBar(summary["global_score"], fill=recommendation_color(summary["recommendation"])),
             Paragraph(safe(rec), styles["TableCell"]),
@@ -291,23 +294,24 @@ def ranking_story(styles, template: Template, summaries: list[dict], preliminary
     story.append(table(rows, [0.35 * inch, 1.75 * inch, 0.68 * inch, 2.1 * inch, 1.25 * inch]))
     story.append(Spacer(1, 0.08 * inch))
     story.append(Paragraph(
-        f"El mejor resultado registrado corresponde a {candidate_label(aliases.get(leader['id'], ''))}, con {percent(leader['global_score'])}. Esta posición refleja la suma ponderada de los criterios evaluados y debe complementarse con la revisión cualitativa del expediente.",
+        f"El mejor resultado registrado corresponde a {safe(candidate_names.get(leader['id'], 'el participante con mayor puntuación'))}, con {percent(leader['global_score'])}. Esta posición refleja la suma ponderada de los criterios evaluados y debe complementarse con la revisión cualitativa del expediente.",
         styles["Bodyx"],
     ))
     story.append(PageBreak())
     return story
 
 
-def category_matrix_story(styles, template: Template, summaries: list[dict], aliases: dict[int, str]):
+def category_matrix_story(styles, template: Template, summaries: list[dict], candidates: list[Candidate]):
     story = [Paragraph("Comparación por categoría", styles["H1x"])]
     if not summaries:
         return story
+    candidate_names = candidate_name_by_id(candidates)
     categories = [category.name for category in template.categories]
     header = [Paragraph("Participante", styles["TableHeader"])] + [Paragraph(safe(category), styles["TableHeader"]) for category in categories] + [Paragraph("Global", styles["TableHeader"])]
     rows = [header]
     for summary in summaries:
         rows.append(
-            [Paragraph(candidate_label(aliases.get(summary["id"], "")), styles["TableCell"])]
+            [Paragraph(safe(candidate_names.get(summary["id"], "Participante")), styles["TableCell"])]
             + [Paragraph(percent(summary["categories"].get(category, 0)), styles["TableRight"]) for category in categories]
             + [Paragraph(percent(summary["global_score"]), styles["TableRight"])]
         )
@@ -338,6 +342,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
         "El siguiente cuadro se limita a los criterios que tienen al menos una puntuación registrada. Los criterios ponderados se expresan de 0 a 5; los requisitos críticos se muestran como Cumple o No cumple.",
         styles["Bodyx"],
     ))
+    story.append(Paragraph("Nota: el guion (-) indica que el criterio está pendiente de evaluación para ese participante.", styles["Smallx"]))
     for category in dict.fromkeys(criterion.category for criterion in evaluated):
         children = [criterion for criterion in evaluated if criterion.category == category]
         header = [Paragraph("Criterio", styles["TableHeader"]), Paragraph("Peso global", styles["TableHeader"])] + [Paragraph(aliases[candidate.id], styles["TableHeader"]) for candidate in candidates]
@@ -345,7 +350,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
         for criterion in children:
             rows.append(
                 [Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph("Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)), styles["TableRight"])]
-                + [Paragraph(criterion_score_text(criterion, score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None), styles["MatrixCell"]) for candidate in candidates]
+                + [Paragraph(criterion_score_text(criterion, score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None, "-"), styles["MatrixCell"]) for candidate in candidates]
             )
         width = 6.65 * inch
         fixed = 2.55 * inch
@@ -354,7 +359,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
     return story
 
 
-def participant_profiles_story(styles, candidates: list[Candidate], criteria: list[Criterion], aliases: dict[int, str]):
+def participant_profiles_story(styles, candidates: list[Candidate], criteria: list[Criterion]):
     story = [PageBreak(), Paragraph("Lectura por participante", styles["H1x"])]
     if not candidates:
         story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
@@ -373,7 +378,7 @@ def participant_profiles_story(styles, candidates: list[Candidate], criteria: li
         scored.sort(key=lambda row: row[0].score, reverse=True)
         strengths = [row for row in scored if row[0].score >= 4][:3]
         gaps = [row for row in sorted(scored, key=lambda row: row[0].score) if row[0].score < 3][:3]
-        block = [Paragraph(candidate_label(aliases[candidate.id]), styles["H2x"])]
+        block = [Paragraph(safe(candidate.name), styles["H2x"])]
         if strengths:
             block.append(Paragraph("Aspectos favorables observados:", styles["Smallx"]))
             for score, criterion in strengths:
@@ -447,10 +452,10 @@ def synthesis_story(styles, template: Template, summaries: list[dict], prelimina
 
 def general_report_source_text(template: Template, candidates: list[Candidate], criteria: list[Criterion]) -> str:
     candidates = sorted(candidates, key=lambda candidate: candidate.name)
-    aliases = participant_aliases(candidates)
     summaries = [summarize_candidate(candidate, criteria, template) for candidate in candidates]
     summaries.sort(key=lambda row: row["global_score"], reverse=True)
     preliminary = has_pending_scores(candidates, criteria)
+    candidate_names = candidate_name_by_id(candidates)
     score_maps: dict[int, dict[int, Score]] = {
         candidate.id: {score.criterion_id: score for score in candidate.scores}
         for candidate in candidates
@@ -466,7 +471,7 @@ def general_report_source_text(template: Template, candidates: list[Candidate], 
         "IDENTIFICACIÓN DE PARTICIPANTES",
     ]
     for candidate in candidates:
-        lines.append(f"{candidate_label(aliases[candidate.id])}: {candidate.name}")
+        lines.append(candidate.name)
 
     lines.extend(["", "ESTRUCTURA DE EVALUACIÓN"])
     grouped = defaultdict(list)
@@ -481,28 +486,28 @@ def general_report_source_text(template: Template, candidates: list[Candidate], 
     lines.extend(["", "RANKING GLOBAL"])
     for index, summary in enumerate(summaries, start=1):
         lines.append(
-            f"{index}. {candidate_label(aliases.get(summary['id'], ''))} | Resultado: {percent(summary['global_score'])} | "
+            f"{index}. {candidate_names.get(summary['id'], 'Participante')} | Resultado: {percent(summary['global_score'])} | "
             f"Lectura: {clean_recommendation(summary['recommendation'])}"
         )
 
     lines.extend(["", "COMPARACIÓN POR CATEGORÍA"])
     for summary in summaries:
         values = ", ".join(f"{category.name}: {percent(summary['categories'].get(category.name, 0))}" for category in template.categories)
-        lines.append(f"{candidate_label(aliases.get(summary['id'], ''))}: {values}")
+        lines.append(f"{candidate_names.get(summary['id'], 'Participante')}: {values}")
 
     lines.extend(["", "CRITERIOS EVALUADOS"])
     for criterion in evaluated_criteria(candidates, criteria):
         values = []
         for candidate in candidates:
             score = score_maps.get(candidate.id, {}).get(criterion.id)
-            values.append(f"{aliases[candidate.id]}={criterion_score_text(criterion, score.score if score else None)}")
+            values.append(f"{candidate.name}={criterion_score_text(criterion, score.score if score else None)}")
         lines.append(f"{criterion.category} / {criterion.aspect}: {', '.join(values)}")
 
     lines.extend(["", "LECTURA POR PARTICIPANTE"])
     criteria_by_id = {criterion.id: criterion for criterion in criteria}
     for candidate in candidates:
         summary = next((item for item in summaries if item["id"] == candidate.id), None)
-        lines.append(f"{candidate_label(aliases[candidate.id])} | Resultado global: {percent(summary['global_score']) if summary else 'Pendiente'}")
+        lines.append(f"{candidate.name} | Resultado global: {percent(summary['global_score']) if summary else 'Pendiente'}")
         scored = [
             (score, criteria_by_id.get(score.criterion_id))
             for score in candidate.scores
@@ -543,10 +548,10 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     story.extend(cover_story(styles, template, candidates, preliminary))
     story.extend(participant_directory_story(styles, candidates, aliases))
     story.extend(structure_story(styles, template, criteria))
-    story.extend(ranking_story(styles, template, summaries, preliminary, aliases))
-    story.extend(category_matrix_story(styles, template, summaries, aliases))
+    story.extend(ranking_story(styles, template, summaries, preliminary, candidates))
+    story.extend(category_matrix_story(styles, template, summaries, candidates))
     story.extend(criterion_matrix_story(styles, candidates, criteria, aliases))
-    story.extend(participant_profiles_story(styles, candidates, criteria, aliases))
+    story.extend(participant_profiles_story(styles, candidates, criteria))
     story.extend(synthesis_story(styles, template, summaries, preliminary, narrative))
     doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     buffer.seek(0)
