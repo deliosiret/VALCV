@@ -2654,7 +2654,6 @@ function App() {
                             />
                             <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm font-semibold text-muted">%</span>
                           </div>
-                          <small className="mt-1 block text-[11px] font-semibold text-[#486366]">Redistribuye en puntos enteros</small>
                         </label>
                         <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={() => addTemplateCriterion(category.name)}>
                           <Plus size={18} /> Criterio
@@ -2697,9 +2696,6 @@ function App() {
                                     />
                                     <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm font-semibold text-muted">%</span>
                                   </div>
-                                  <small className="mt-1 block text-[11px] font-semibold text-[#486366]">
-                                    Redistribuye en puntos enteros
-                                  </small>
                                 </label>
                               )}
                               <CriticalToggle value={criterion.is_critical} onChange={(is_critical) => updateTemplateCritical(criterionIndex, is_critical)} />
