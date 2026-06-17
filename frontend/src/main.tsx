@@ -1343,6 +1343,34 @@ function App() {
     }
   }
 
+  async function downloadGeneralReport() {
+    if (!selectedTemplate) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_URL}/templates/${selectedTemplate.id}/general-report`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("valcv_token") ?? ""}` },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(error.detail ?? "No se pudo generar el reporte general");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `reporte_general_${selectedTemplate.name.replace(/[^a-z0-9]+/gi, "_")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice("Reporte general generado");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo generar el reporte general");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateUserQuota(userId: number, monthly_ai_quota_usd: number) {
     setBusy(true);
     try {
@@ -1886,6 +1914,9 @@ function App() {
           </button>
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => load()} disabled={busy} title="Actualizar">
             <RefreshCw size={18} />
+          </button>
+          <button className={`${buttonClass} bg-[#486366] px-2 md:px-3`} onClick={downloadGeneralReport} disabled={busy || !selectedTemplate} title="Reporte general en PDF">
+            <FileText size={18} />
           </button>
           <button className={`${buttonClass} px-2 md:px-3`} onClick={() => { setEditingApiKey(false); setSettingsOpen(true); }} disabled={busy || (!canManageAiSettings && !canManageUsers)} title="Configuración">
             <Settings size={18} />

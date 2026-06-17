@@ -6,3 +6,4 @@ pydantic-settings==2.7.1
 python-multipart==0.0.20
 google-genai==2.6.0
 python-docx==1.2.0
+reportlab==4.2.5

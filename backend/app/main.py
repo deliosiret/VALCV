@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
+from app.general_report import build_template_general_report
 from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
 from app.reports import build_candidate_report
 from app.schemas import (
@@ -1300,6 +1301,31 @@ def candidate_report(candidate_id: int, _: User = Depends(require_permission("vi
     return StreamingResponse(
         report,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/templates/{template_id}/general-report")
+def template_general_report(template_id: int, _: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
+    template = get_template_or_404(db, template_id)
+    criteria = (
+        db.query(Criterion)
+        .filter(Criterion.template_id == template_id)
+        .order_by(Criterion.order_index)
+        .all()
+    )
+    candidates = (
+        db.query(Candidate)
+        .options(selectinload(Candidate.scores))
+        .filter(Candidate.template_id == template_id)
+        .order_by(Candidate.name)
+        .all()
+    )
+    report = build_template_general_report(template, candidates, criteria)
+    filename = f"reporte_general_{safe_filename(template.name)}.pdf"
+    return StreamingResponse(
+        report,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
