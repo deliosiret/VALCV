@@ -41,6 +41,7 @@ PAPER = colors.HexColor("#f7faf9")
 WHITE = colors.white
 DEEP_BLUE = colors.HexColor("#18383d")
 PALE_BLUE = colors.HexColor("#edf6f5")
+COVER_BLOCK_WIDTH = 5.86 * inch
 
 
 def compact_number(value: float, decimals: int = 2) -> str:
@@ -271,7 +272,7 @@ def add_cover_page(canvas, doc):
     canvas.roundRect(0.55 * inch, 1.02 * inch, width - 1.1 * inch, 6.42 * inch, 12, fill=0, stroke=1)
 
     canvas.setFillColor(colors.HexColor("#fbfdfd"))
-    canvas.roundRect(0.78 * inch, 1.42 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
+    canvas.roundRect(0.78 * inch, 1.42 * inch, 4.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#eaf4f2"))
     canvas.roundRect(width - 2.15 * inch, 1.42 * inch, 1.45 * inch, 1.45 * inch, 18, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#dcece9"))
@@ -301,7 +302,7 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
         "los participantes registrados y las puntuaciones disponibles. Su propósito es facilitar una revisión ejecutiva, clara y "
         "ordenada de fortalezas, brechas y resultados preliminares o finales según el estado de avance de la evaluación."
     )
-    intro_box = Table([[Paragraph(intro, styles["CoverIntro"])]], colWidths=[5.35 * inch], hAlign="LEFT")
+    intro_box = Table([[Paragraph(intro, styles["CoverIntro"])]], colWidths=[COVER_BLOCK_WIDTH], hAlign="LEFT")
     intro_box.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), WHITE),
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
@@ -315,7 +316,7 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
     if preliminary:
         note_box = Table(
             [[Paragraph("Valoración preliminar: existen criterios o participantes con puntuaciones pendientes. Las conclusiones deben leerse como una fotografía de avance y no como cierre definitivo del proceso.", styles["Note"])]],
-            colWidths=[5.9 * inch],
+            colWidths=[COVER_BLOCK_WIDTH],
             hAlign="LEFT",
         )
         note_box.setStyle(TableStyle([
@@ -331,7 +332,8 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
         [Paragraph(str(len(candidates)), styles["CoverKpi"]), Paragraph(str(len(template.categories)), styles["CoverKpi"]), Paragraph(str(len(template.criteria)), styles["CoverKpi"])],
         [Paragraph("Participantes", styles["CoverKpiLabel"]), Paragraph("Categorías", styles["CoverKpiLabel"]), Paragraph("Criterios", styles["CoverKpiLabel"])],
     ]
-    kpi_table = Table(kpis, colWidths=[1.52 * inch, 1.52 * inch, 1.52 * inch], hAlign="LEFT")
+    kpi_col_width = COVER_BLOCK_WIDTH / 3
+    kpi_table = Table(kpis, colWidths=[kpi_col_width, kpi_col_width, kpi_col_width], hAlign="LEFT")
     kpi_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE),
         ("BOX", (0, 0), (-1, -1), 0.7, LINE),
@@ -346,7 +348,7 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
             Paragraph("Documento de apoyo a la decisión", styles["CoverFooterTitle"]),
             Paragraph("Uso institucional · Evaluación curricular comparativa", styles["CoverFooterText"]),
         ]],
-        colWidths=[2.35 * inch, 3.1 * inch],
+        colWidths=[2.35 * inch, COVER_BLOCK_WIDTH - 2.35 * inch],
         hAlign="LEFT",
     )
     footer_card.setStyle(TableStyle([
