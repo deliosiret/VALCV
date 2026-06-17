@@ -178,6 +178,7 @@ def make_styles():
     base.add(ParagraphStyle("TableHeader", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=7.5, leading=9, textColor=BLUE, alignment=TA_CENTER))
     base.add(ParagraphStyle("TableCell", parent=base["BodyText"], fontName="Helvetica", fontSize=7.3, leading=8.8, textColor=INK))
     base.add(ParagraphStyle("TableRight", parent=base["TableCell"], alignment=TA_RIGHT))
+    base.add(ParagraphStyle("TableCenter", parent=base["TableCell"], alignment=TA_CENTER))
     base.add(ParagraphStyle("MatrixCell", parent=base["BodyText"], fontName="Helvetica", fontSize=5.4, leading=6.2, textColor=INK, alignment=TA_CENTER))
     base.add(ParagraphStyle("Kpi", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=14, leading=16, textColor=TEAL, alignment=TA_CENTER))
     base.add(ParagraphStyle("KpiLabel", parent=base["BodyText"], fontName="Helvetica", fontSize=7.6, leading=9, textColor=MUTED, alignment=TA_CENTER))
@@ -218,6 +219,14 @@ def add_cover_page(canvas, doc):
     canvas.rect(0, height - 1.19 * inch, width, 0.14 * inch, fill=1, stroke=0)
     canvas.setFillColor(GOLD)
     canvas.rect(0.55 * inch, height - 1.19 * inch, 1.25 * inch, 0.14 * inch, fill=1, stroke=0)
+    if LOGO_PATH.exists():
+        canvas.drawImage(str(LOGO_PATH), 0.62 * inch, height - 0.87 * inch, width=1.52 * inch, height=0.52 * inch, preserveAspectRatio=True, mask="auto")
+    canvas.setFont("Helvetica", 8.5)
+    canvas.setFillColor(WHITE)
+    canvas.drawString(0.62 * inch, height - 0.98 * inch, "Superintendencia de Electricidad")
+    canvas.setFont("Helvetica", 8)
+    canvas.drawRightString(width - 0.82 * inch, height - 0.58 * inch, "Valoración preliminar" if getattr(doc, "preliminary", False) else "Valoración completa")
+    canvas.drawRightString(width - 0.82 * inch, height - 0.78 * inch, f"Generado: {getattr(doc, 'generated_at', '')}")
     canvas.setStrokeColor(colors.HexColor("#dce9e7"))
     canvas.setLineWidth(0.7)
     canvas.roundRect(0.55 * inch, 1.25 * inch, width - 1.1 * inch, 5.62 * inch, 10, fill=0, stroke=1)
@@ -245,27 +254,7 @@ def add_footer(canvas, doc):
 
 
 def cover_story(styles, template: Template, candidates: list[Candidate], preliminary: bool):
-    story = [Spacer(1, 0.18 * inch)]
-    generated_at = datetime.now().strftime("%d/%m/%Y · %H:%M")
-    status_text = "Valoración preliminar" if preliminary else "Valoración completa"
-    logo_block = []
-    if LOGO_PATH.exists():
-        logo_block.append(Image(str(LOGO_PATH), width=1.65 * inch, height=0.58 * inch, kind="proportional"))
-    logo_block.append(Paragraph("Superintendencia de Electricidad", styles["CoverSub"]))
-    meta_block = [
-        Paragraph(status_text, styles["CoverMeta"]),
-        Paragraph(f"Generado: {generated_at}", styles["CoverMeta"]),
-    ]
-    header = Table([[logo_block, meta_block]], colWidths=[3.75 * inch, 2.75 * inch], hAlign="LEFT")
-    header.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(header)
-    story.append(Spacer(1, 0.8 * inch))
+    story = [Spacer(1, 1.28 * inch)]
     story.append(Paragraph("REPORTE GENERAL DE EVALUACIÓN CURRICULAR", styles["CoverEyebrow"]))
     story.append(Paragraph("Evaluación comparativa de participantes", styles["CoverTitle"]))
     story.append(AccentRule())
@@ -336,7 +325,7 @@ def structure_story(styles, template: Template, criteria: list[Criterion]):
         rows = [[Paragraph("Criterio", styles["TableHeader"]), Paragraph("Peso global", styles["TableHeader"])]]
         for criterion in grouped.get(category.name, []):
             weight = "Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion))
-            rows.append([Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph(weight, styles["TableRight"])])
+            rows.append([Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph(weight, styles["TableCenter"])])
         block = [
             Paragraph(f"{safe(category.name)} · {percent(category.weight)} del perfil", styles["H2x"]),
             table(rows, [5.55 * inch, 0.95 * inch]),
@@ -384,7 +373,7 @@ def ranking_story(styles, template: Template, summaries: list[dict], preliminary
         rows.append([
             Paragraph(str(index), styles["TableCell"]),
             Paragraph(safe(candidate_names.get(summary["id"], "Participante")), styles["TableCell"]),
-            Paragraph(percent(summary["global_score"]), styles["TableRight"]),
+            Paragraph(percent(summary["global_score"]), styles["TableCenter"]),
             HorizontalBar(summary["global_score"], fill=recommendation_color(summary["recommendation"])),
             Paragraph(safe(rec), styles["TableCell"]),
         ])
@@ -409,8 +398,8 @@ def category_matrix_story(styles, template: Template, summaries: list[dict], can
     for summary in summaries:
         rows.append(
             [Paragraph(safe(candidate_names.get(summary["id"], "Participante")), styles["TableCell"])]
-            + [Paragraph(percent(summary["categories"].get(category, 0)), styles["TableRight"]) for category in categories]
-            + [Paragraph(percent(summary["global_score"]), styles["TableRight"])]
+            + [Paragraph(percent(summary["categories"].get(category, 0)), styles["TableCenter"]) for category in categories]
+            + [Paragraph(percent(summary["global_score"]), styles["TableCenter"])]
         )
     width = 6.65 * inch
     first = 1.35 * inch
@@ -446,7 +435,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
         rows = [header]
         for criterion in children:
             rows.append(
-                [Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph("Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)), styles["TableRight"])]
+                [Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph("Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)), styles["TableCenter"])]
                 + [Paragraph(criterion_score_text(criterion, score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None, "-"), styles["MatrixCell"]) for candidate in candidates]
             )
         width = 6.65 * inch
@@ -641,6 +630,8 @@ def build_template_general_report(template: Template, candidates: list[Candidate
         bottomMargin=0.72 * inch,
         title=f"Reporte general - {template.name}",
     )
+    doc.preliminary = preliminary
+    doc.generated_at = datetime.now().strftime("%d/%m/%Y · %H:%M")
     story = []
     story.extend(cover_story(styles, template, candidates, preliminary))
     story.extend(participant_directory_story(styles, candidates, aliases))
