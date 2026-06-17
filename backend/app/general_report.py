@@ -50,6 +50,35 @@ def score_text(value: float | None) -> str:
     return "Pendiente" if value is None else f"{compact_number(value, 1)}/5"
 
 
+def critical_score_text(value: float | None) -> str:
+    if value is None:
+        return "Pendiente"
+    return "Cumple" if value >= 5 else "No cumple"
+
+
+def criterion_score_text(criterion: Criterion, value: float | None) -> str:
+    return critical_score_text(value) if criterion.is_critical else score_text(value)
+
+
+def alias_name(index: int) -> str:
+    letters = ""
+    current = index
+    while True:
+        letters = chr(ord("A") + (current % 26)) + letters
+        current = current // 26 - 1
+        if current < 0:
+            break
+    return letters
+
+
+def candidate_label(code: str) -> str:
+    return f"Candidato {code}"
+
+
+def participant_aliases(candidates: list[Candidate]) -> dict[int, str]:
+    return {candidate.id: alias_name(index) for index, candidate in enumerate(candidates)}
+
+
 def clean_recommendation(value: str) -> str:
     if value == "No califica por criterio crítico":
         return "No califica para el perfil"
@@ -114,6 +143,7 @@ def make_styles():
     base.add(ParagraphStyle("TableHeader", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=7.5, leading=9, textColor=BLUE, alignment=TA_CENTER))
     base.add(ParagraphStyle("TableCell", parent=base["BodyText"], fontName="Helvetica", fontSize=7.3, leading=8.8, textColor=INK))
     base.add(ParagraphStyle("TableRight", parent=base["TableCell"], alignment=TA_RIGHT))
+    base.add(ParagraphStyle("MatrixCell", parent=base["BodyText"], fontName="Helvetica", fontSize=5.4, leading=6.2, textColor=INK, alignment=TA_CENTER))
     base.add(ParagraphStyle("Kpi", parent=base["BodyText"], fontName="Helvetica-Bold", fontSize=14, leading=16, textColor=TEAL, alignment=TA_CENTER))
     base.add(ParagraphStyle("KpiLabel", parent=base["BodyText"], fontName="Helvetica", fontSize=7.6, leading=9, textColor=MUTED, alignment=TA_CENTER))
     base.add(ParagraphStyle("Note", parent=base["BodyText"], fontName="Helvetica", fontSize=8.5, leading=11.5, textColor=RED, backColor=LIGHT_RED, borderColor=colors.HexColor("#f0d7c5"), borderWidth=0.6, borderPadding=6, spaceAfter=8))
@@ -209,7 +239,25 @@ def structure_story(styles, template: Template, criteria: list[Criterion]):
     return story
 
 
-def ranking_story(styles, template: Template, summaries: list[dict], preliminary: bool):
+def participant_directory_story(styles, candidates: list[Candidate], aliases: dict[int, str]):
+    story = [Paragraph("Identificación de participantes", styles["H1x"])]
+    if not candidates:
+        story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
+        story.append(PageBreak())
+        return story
+    story.append(Paragraph(
+        "Para facilitar la lectura de tablas y gráficos, el informe utiliza referencias abreviadas. La correspondencia completa se presenta únicamente en esta sección.",
+        styles["Bodyx"],
+    ))
+    rows = [[Paragraph("Referencia", styles["TableHeader"]), Paragraph("Participante", styles["TableHeader"])]]
+    for candidate in candidates:
+        rows.append([Paragraph(candidate_label(aliases[candidate.id]), styles["TableCell"]), Paragraph(safe(candidate.name), styles["TableCell"])])
+    story.append(table(rows, [1.2 * inch, 5.1 * inch]))
+    story.append(PageBreak())
+    return story
+
+
+def ranking_story(styles, template: Template, summaries: list[dict], preliminary: bool, aliases: dict[int, str]):
     story = [Paragraph("Resultados comparativos", styles["H1x"])]
     if not summaries:
         story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
@@ -226,7 +274,7 @@ def ranking_story(styles, template: Template, summaries: list[dict], preliminary
         rec = clean_recommendation(summary["recommendation"])
         rows.append([
             Paragraph(str(index), styles["TableCell"]),
-            Paragraph(safe(summary["name"]), styles["TableCell"]),
+            Paragraph(candidate_label(aliases.get(summary["id"], "")), styles["TableCell"]),
             Paragraph(percent(summary["global_score"]), styles["TableRight"]),
             HorizontalBar(summary["global_score"], fill=recommendation_color(summary["recommendation"])),
             Paragraph(safe(rec), styles["TableCell"]),
@@ -234,14 +282,14 @@ def ranking_story(styles, template: Template, summaries: list[dict], preliminary
     story.append(table(rows, [0.35 * inch, 1.75 * inch, 0.68 * inch, 2.1 * inch, 1.25 * inch]))
     story.append(Spacer(1, 0.08 * inch))
     story.append(Paragraph(
-        f"El mejor resultado registrado corresponde a {safe(leader['name'])}, con {percent(leader['global_score'])}. Esta posición refleja la suma ponderada de los criterios evaluados y debe complementarse con la revisión cualitativa del expediente.",
+        f"El mejor resultado registrado corresponde a {candidate_label(aliases.get(leader['id'], ''))}, con {percent(leader['global_score'])}. Esta posición refleja la suma ponderada de los criterios evaluados y debe complementarse con la revisión cualitativa del expediente.",
         styles["Bodyx"],
     ))
     story.append(PageBreak())
     return story
 
 
-def category_matrix_story(styles, template: Template, summaries: list[dict]):
+def category_matrix_story(styles, template: Template, summaries: list[dict], aliases: dict[int, str]):
     story = [Paragraph("Comparación por categoría", styles["H1x"])]
     if not summaries:
         return story
@@ -250,7 +298,7 @@ def category_matrix_story(styles, template: Template, summaries: list[dict]):
     rows = [header]
     for summary in summaries:
         rows.append(
-            [Paragraph(safe(summary["name"]), styles["TableCell"])]
+            [Paragraph(candidate_label(aliases.get(summary["id"], "")), styles["TableCell"])]
             + [Paragraph(percent(summary["categories"].get(category, 0)), styles["TableRight"]) for category in categories]
             + [Paragraph(percent(summary["global_score"]), styles["TableRight"])]
         )
@@ -267,7 +315,7 @@ def category_matrix_story(styles, template: Template, summaries: list[dict]):
     return story
 
 
-def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[Criterion]):
+def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[Criterion], aliases: dict[int, str]):
     evaluated = evaluated_criteria(candidates, criteria)
     story = [Paragraph("Cuadro comparativo de criterios evaluados", styles["H1x"])]
     if not evaluated:
@@ -278,17 +326,17 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
         for candidate in candidates
     }
     story.append(Paragraph(
-        "El siguiente cuadro se limita a los criterios que tienen al menos una puntuación registrada. La escala se expresa de 0 a 5 para facilitar la lectura comparativa.",
+        "El siguiente cuadro se limita a los criterios que tienen al menos una puntuación registrada. Los criterios ponderados se expresan de 0 a 5; los requisitos críticos se muestran como Cumple o No cumple.",
         styles["Bodyx"],
     ))
     for category in dict.fromkeys(criterion.category for criterion in evaluated):
         children = [criterion for criterion in evaluated if criterion.category == category]
-        header = [Paragraph("Criterio", styles["TableHeader"]), Paragraph("Peso global", styles["TableHeader"])] + [Paragraph(safe(candidate.name), styles["TableHeader"]) for candidate in candidates]
+        header = [Paragraph("Criterio", styles["TableHeader"]), Paragraph("Peso global", styles["TableHeader"])] + [Paragraph(aliases[candidate.id], styles["TableHeader"]) for candidate in candidates]
         rows = [header]
         for criterion in children:
             rows.append(
                 [Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph("Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)), styles["TableRight"])]
-                + [Paragraph(score_text(score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None), styles["TableRight"]) for candidate in candidates]
+                + [Paragraph(criterion_score_text(criterion, score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None), styles["MatrixCell"]) for candidate in candidates]
             )
         width = 6.65 * inch
         fixed = 2.55 * inch
@@ -297,7 +345,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
     return story
 
 
-def participant_profiles_story(styles, candidates: list[Candidate], criteria: list[Criterion]):
+def participant_profiles_story(styles, candidates: list[Candidate], criteria: list[Criterion], aliases: dict[int, str]):
     story = [PageBreak(), Paragraph("Lectura por participante", styles["H1x"])]
     if not candidates:
         story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
@@ -316,17 +364,17 @@ def participant_profiles_story(styles, candidates: list[Candidate], criteria: li
         scored.sort(key=lambda row: row[0].score, reverse=True)
         strengths = [row for row in scored if row[0].score >= 4][:3]
         gaps = [row for row in sorted(scored, key=lambda row: row[0].score) if row[0].score < 3][:3]
-        block = [Paragraph(safe(candidate.name), styles["H2x"])]
+        block = [Paragraph(candidate_label(aliases[candidate.id]), styles["H2x"])]
         if strengths:
             block.append(Paragraph("Aspectos favorables observados:", styles["Smallx"]))
             for score, criterion in strengths:
-                block.append(Paragraph(f"• {safe(criterion.aspect)} ({score_text(score.score)}).", styles["Smallx"]))
+                block.append(Paragraph(f"• {safe(criterion.aspect)} ({criterion_score_text(criterion, score.score)}).", styles["Smallx"]))
         else:
             block.append(Paragraph("No se identifican todavía criterios con puntuación alta registrada.", styles["Smallx"]))
         if gaps:
             block.append(Paragraph("Puntos a revisar o fortalecer:", styles["Smallx"]))
             for score, criterion in gaps:
-                block.append(Paragraph(f"• {safe(criterion.aspect)} ({score_text(score.score)}).", styles["Smallx"]))
+                block.append(Paragraph(f"• {safe(criterion.aspect)} ({criterion_score_text(criterion, score.score)}).", styles["Smallx"]))
         else:
             block.append(Paragraph("No se registran brechas marcadas entre los criterios evaluados hasta el momento.", styles["Smallx"]))
         if candidate.comments:
@@ -376,6 +424,7 @@ def synthesis_story(styles, template: Template, summaries: list[dict], prelimina
 def build_template_general_report(template: Template, candidates: list[Candidate], criteria: list[Criterion]) -> BytesIO:
     styles = make_styles()
     candidates = sorted(candidates, key=lambda candidate: candidate.name)
+    aliases = participant_aliases(candidates)
     summaries = [summarize_candidate(candidate, criteria, template) for candidate in candidates]
     summaries.sort(key=lambda row: row["global_score"], reverse=True)
     preliminary = has_pending_scores(candidates, criteria)
@@ -392,11 +441,12 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     )
     story = []
     story.extend(cover_story(styles, template, candidates, preliminary))
+    story.extend(participant_directory_story(styles, candidates, aliases))
     story.extend(structure_story(styles, template, criteria))
-    story.extend(ranking_story(styles, template, summaries, preliminary))
-    story.extend(category_matrix_story(styles, template, summaries))
-    story.extend(criterion_matrix_story(styles, candidates, criteria))
-    story.extend(participant_profiles_story(styles, candidates, criteria))
+    story.extend(ranking_story(styles, template, summaries, preliminary, aliases))
+    story.extend(category_matrix_story(styles, template, summaries, aliases))
+    story.extend(criterion_matrix_story(styles, candidates, criteria, aliases))
+    story.extend(participant_profiles_story(styles, candidates, criteria, aliases))
     story.extend(synthesis_story(styles, template, summaries, preliminary))
     doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     buffer.seek(0)
