@@ -1544,12 +1544,6 @@ function App() {
     }));
   }
 
-  function distributeTemplateWeights() {
-    setTemplateDraft((current) => normalizeWeightsEvenly(current));
-    templateWeightLocksRef.current = { categories: [], criteria: {} };
-    setNotice("Pesos distribuidos automáticamente.");
-  }
-
   function updateTemplateCritical(index: number, is_critical: boolean) {
     updateTemplateCriterion(index, { is_critical, within_category_weight: is_critical ? 0 : templateDraft.criteria[index]?.within_category_weight ?? 0 });
   }
@@ -2616,9 +2610,6 @@ function App() {
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={distributeTemplateWeights}>
-                      Repartir pesos
-                    </button>
                     <button className={`${buttonClass} bg-[#486366]`} type="button" onClick={addTemplateCategory}>
                       <Plus size={18} /> Categoría
                     </button>
