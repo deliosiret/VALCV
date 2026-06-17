@@ -572,26 +572,6 @@ function toTemplateDraft(template: Template, duplicate = false): TemplateDraft {
   };
 }
 
-function normalizeWeightsEvenly(draft: TemplateDraft): TemplateDraft {
-  const categories = draft.categories.map((category) => ({
-    ...category,
-    weight: draft.categories.length ? 1 / draft.categories.length : 0,
-  }));
-  const criteriaByCategory = new Map<string, number>();
-  draft.criteria.forEach((criterion) => {
-    if (criterion.is_critical) return;
-    criteriaByCategory.set(criterion.category, (criteriaByCategory.get(criterion.category) ?? 0) + 1);
-  });
-  const criteria = draft.criteria.map((criterion) => {
-    const siblingCount = criteriaByCategory.get(criterion.category) ?? 0;
-    return {
-      ...criterion,
-      within_category_weight: criterion.is_critical ? 0 : siblingCount ? 1 / siblingCount : 0,
-    };
-  });
-  return { ...draft, categories, criteria };
-}
-
 function templateWeightIssues(draft: TemplateDraft) {
   const issues: string[] = [];
   const categoryTotal = draft.categories.reduce((total, category) => total + (Number(category.weight) || 0), 0);
@@ -1598,21 +1578,9 @@ function App() {
       setNotice(`Revisa la escala de recomendación: ${scaleIssues.join(", ")}.`);
       return;
     }
-    let weightIssues = templateWeightIssues(draftToSave);
+    const weightIssues = templateWeightIssues(draftToSave);
     if (weightIssues.length) {
-      const shouldNormalize = window.confirm(
-        `Los pesos todavía no están completos: ${weightIssues.join(", ")}. ¿Quieres distribuirlos equitativamente y guardar como borrador?`
-      );
-      if (!shouldNormalize) {
-        setNotice("Ajusta los pesos hasta que cada grupo sume 100%.");
-        return;
-      }
-      draftToSave = normalizeWeightsEvenly(draftToSave);
-      setTemplateDraft(draftToSave);
-      weightIssues = templateWeightIssues(draftToSave);
-    }
-    if (weightIssues.length) {
-      setNotice("No se pudo completar automáticamente: revisa categorías y criterios.");
+      setNotice(`Ajusta los pesos antes de guardar: ${weightIssues.join(", ")}.`);
       return;
     }
     const categoryWeights = new Map(draftToSave.categories.map((category) => [category.name.trim(), Number(category.weight) || 0]));
