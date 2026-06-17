@@ -35,6 +35,8 @@ def score_text(score: float | None) -> str:
 
 
 def report_recommendation(value: str) -> str:
+    if value == "No concluyente":
+        return "No concluyente"
     if value == "No califica por criterio crítico":
         return "No califica para el perfil"
     return value
@@ -325,6 +327,11 @@ def bonus_narrative(document: Document, summary: dict) -> None:
 
 
 def conclusion_text(summary: dict, template: Template) -> str:
+    if summary["recommendation"] == "No concluyente":
+        return (
+            "La evaluación todavía no es concluyente porque existen criterios pendientes de puntuación. "
+            "El resultado debe leerse como una referencia preliminar hasta completar la revisión del perfil."
+        )
     if summary["recommendation"] == "No califica por criterio crítico":
         return (
             "La evaluación registra al menos un requisito obligatorio no cumplido o no evidenciado para el perfil. "

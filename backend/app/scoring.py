@@ -8,6 +8,7 @@ BONUS_CATEGORY_NAME = "Bonificación adicional"
 DEFAULT_HIGHLY_RECOMMENDED_THRESHOLD = 0.85
 DEFAULT_RECOMMENDED_THRESHOLD = 0.7
 DEFAULT_REVIEW_THRESHOLD = 0.55
+INCONCLUSIVE_RECOMMENDATION = "No concluyente"
 
 
 def threshold_value(template: Template | None, field: str, default: float) -> float:
@@ -36,10 +37,11 @@ def recommendation(global_score: float, template: Template | None = None) -> str
 
 def summarize_candidate(candidate: Candidate, criteria: list[Criterion], template: Template | None = None) -> dict:
     score_by_criterion = {score.criterion_id: score.score for score in candidate.scores}
+    pending_criteria = [criterion for criterion in criteria if criterion.id not in score_by_criterion]
     failed_critical = [
         criterion
         for criterion in criteria
-        if criterion.is_critical and score_by_criterion.get(criterion.id, 0.0) < 5.0
+        if criterion.is_critical and criterion.id in score_by_criterion and score_by_criterion[criterion.id] < 5.0
     ]
     category_weight = {}
     category_points = defaultdict(float)
@@ -65,21 +67,30 @@ def summarize_candidate(candidate: Candidate, criteria: list[Criterion], templat
     base_global = global_score / max(total_global_weight, 0.00001)
     bonus_score = max(0.0, min(float(candidate.ai_bonus_score or 0), 5.0))
     bonus_amount = (bonus_score / 5.0) * BONUS_GLOBAL_WEIGHT
-    normalized_global = 0.0 if failed_critical else min(1.0, base_global + bonus_amount)
+    is_complete = not pending_criteria
+    normalized_global = 0.0 if is_complete and failed_critical else min(1.0, base_global + bonus_amount)
     if bonus_score > 0 and not failed_critical:
         categories[BONUS_CATEGORY_NAME] = round(bonus_score / 5.0, 4)
+    if not is_complete:
+        recommendation_text = INCONCLUSIVE_RECOMMENDATION
+    elif failed_critical:
+        recommendation_text = "No califica por criterio crítico"
+    else:
+        recommendation_text = recommendation(normalized_global, template)
 
     return {
         "id": candidate.id,
         "name": candidate.name,
         "document_id": candidate.document_id,
         "global_score": round(normalized_global, 4),
-        "base_global_score": round(0.0 if failed_critical else base_global, 4),
+        "base_global_score": round(0.0 if is_complete and failed_critical else base_global, 4),
         "bonus_score": round(bonus_score, 2),
-        "bonus_amount": round(0.0 if failed_critical else min(bonus_amount, max(0.0, 1.0 - base_global)), 4),
+        "bonus_amount": round(0.0 if is_complete and failed_critical else min(bonus_amount, max(0.0, 1.0 - base_global)), 4),
         "bonus_rationale": candidate.ai_bonus_rationale or "",
-        "recommendation": "No califica por criterio crítico" if failed_critical else recommendation(normalized_global, template),
+        "recommendation": recommendation_text,
         "recommendation_scale": recommendation_scale(template),
+        "is_complete": is_complete,
+        "pending_criteria": len(pending_criteria),
         "categories": categories,
     }
 

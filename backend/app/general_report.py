@@ -80,6 +80,8 @@ def participant_aliases(candidates: list[Candidate]) -> dict[int, str]:
 
 
 def clean_recommendation(value: str) -> str:
+    if value == "No concluyente":
+        return "No concluyente"
     if value == "No califica por criterio crítico":
         return "No califica para el perfil"
     return value or "Sin recomendación"

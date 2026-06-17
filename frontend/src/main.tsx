@@ -353,6 +353,9 @@ function decisionLabel(value?: string) {
 
 function recommendationClass(value?: string) {
   const normalized = (value ?? "").toLowerCase();
+  if (normalized.includes("no concluyente")) {
+    return "bg-[#fff7ed] text-[#9a3412]";
+  }
   if (normalized.includes("no recomendable") || normalized.includes("no califica")) {
     return "bg-[#fee2e2] text-[#9a3412]";
   }
