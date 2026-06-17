@@ -12,10 +12,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_template_with_gemini
+from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_general_report_narrative_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.general_report import build_template_general_report
+from app.general_report import build_template_general_report, general_report_source_text
 from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
 from app.reports import build_candidate_report
 from app.schemas import (
@@ -1306,7 +1306,7 @@ def candidate_report(candidate_id: int, _: User = Depends(require_permission("vi
 
 
 @app.get("/templates/{template_id}/general-report")
-def template_general_report(template_id: int, _: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
+def template_general_report(template_id: int, user: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     template = get_template_or_404(db, template_id)
     criteria = (
         db.query(Criterion)
@@ -1321,7 +1321,22 @@ def template_general_report(template_id: int, _: User = Depends(require_permissi
         .order_by(Candidate.name)
         .all()
     )
-    report = build_template_general_report(template, candidates, criteria)
+    narrative = None
+    try:
+        enforce_ai_quota(db, user)
+        api_key, model = get_ai_config(db)
+        source_text = general_report_source_text(template, candidates, criteria)
+        ai_result = generate_general_report_narrative_with_gemini(source_text, api_key, model)
+        record_ai_interaction(db, "general_report_narrative", model, ai_result, user=user, template_id=template.id)
+        db.commit()
+        narrative = ai_result.payload
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="No se pudo generar la síntesis y conclusión del informe con IA.")
+    report = build_template_general_report(template, candidates, criteria, narrative)
     filename = f"reporte_general_{safe_filename(template.name)}.pdf"
     return StreamingResponse(
         report,

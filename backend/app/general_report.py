@@ -87,6 +87,13 @@ def clean_recommendation(value: str) -> str:
     return value or "Sin recomendación"
 
 
+def narrative_paragraphs(narrative: dict | None, key: str) -> list[str]:
+    values = (narrative or {}).get(key, [])
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
 def safe(value: str) -> str:
     return (value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -386,8 +393,18 @@ def participant_profiles_story(styles, candidates: list[Candidate], criteria: li
     return story
 
 
-def synthesis_story(styles, template: Template, summaries: list[dict], preliminary: bool):
+def synthesis_story(styles, template: Template, summaries: list[dict], preliminary: bool, narrative: dict | None = None):
     story = [PageBreak(), Paragraph("Síntesis interpretativa", styles["H1x"])]
+    ai_synthesis = narrative_paragraphs(narrative, "synthesis")
+    ai_conclusion = narrative_paragraphs(narrative, "conclusion")
+    if ai_synthesis:
+        for text in ai_synthesis:
+            story.append(Paragraph(safe(text), styles["Bodyx"]))
+        story.append(Paragraph("Conclusión", styles["H1x"]))
+        for text in ai_conclusion or ["La conclusión debe completarse con la validación humana responsable del proceso." ]:
+            story.append(Paragraph(safe(text), styles["Bodyx"]))
+        return story
+
     if not summaries:
         story.append(Paragraph("No hay información suficiente para elaborar una síntesis comparativa.", styles["Bodyx"]))
         return story
@@ -420,10 +437,91 @@ def synthesis_story(styles, template: Template, summaries: list[dict], prelimina
             "Al estar completas las puntuaciones registradas para la estructura actual, el informe puede utilizarse como insumo consolidado para la deliberación del proceso, sin sustituir la decisión humana competente.",
             styles["Bodyx"],
         ))
+    story.append(Paragraph("Conclusión", styles["H1x"]))
+    story.append(Paragraph(
+        "La lectura final debe integrarse con la verificación documental, las entrevistas, las pruebas técnicas y cualquier validación institucional que corresponda al proceso.",
+        styles["Bodyx"],
+    ))
     return story
 
 
-def build_template_general_report(template: Template, candidates: list[Candidate], criteria: list[Criterion]) -> BytesIO:
+def general_report_source_text(template: Template, candidates: list[Candidate], criteria: list[Criterion]) -> str:
+    candidates = sorted(candidates, key=lambda candidate: candidate.name)
+    aliases = participant_aliases(candidates)
+    summaries = [summarize_candidate(candidate, criteria, template) for candidate in candidates]
+    summaries.sort(key=lambda row: row["global_score"], reverse=True)
+    preliminary = has_pending_scores(candidates, criteria)
+    score_maps: dict[int, dict[int, Score]] = {
+        candidate.id: {score.criterion_id: score for score in candidate.scores}
+        for candidate in candidates
+    }
+    lines = [
+        "REPORTE GENERAL DE EVALUACIÓN CURRICULAR",
+        f"Perfil evaluado: {template.name}",
+        f"Estado de la valoración: {'preliminar/no concluyente' if preliminary else 'completa'}",
+        f"Participantes: {len(candidates)}",
+        f"Categorías: {len(template.categories)}",
+        f"Criterios: {len(criteria)}",
+        "",
+        "IDENTIFICACIÓN DE PARTICIPANTES",
+    ]
+    for candidate in candidates:
+        lines.append(f"{candidate_label(aliases[candidate.id])}: {candidate.name}")
+
+    lines.extend(["", "ESTRUCTURA DE EVALUACIÓN"])
+    grouped = defaultdict(list)
+    for criterion in criteria:
+        grouped[criterion.category].append(criterion)
+    for category in template.categories:
+        lines.append(f"Categoría: {category.name} | Peso del perfil: {percent(category.weight)}")
+        for criterion in grouped.get(category.name, []):
+            weight = "requisito de cumplimiento obligatorio" if criterion.is_critical else percent(criterion_global_weight(criterion))
+            lines.append(f"- {criterion.aspect} | Peso global: {weight}")
+
+    lines.extend(["", "RANKING GLOBAL"])
+    for index, summary in enumerate(summaries, start=1):
+        lines.append(
+            f"{index}. {candidate_label(aliases.get(summary['id'], ''))} | Resultado: {percent(summary['global_score'])} | "
+            f"Lectura: {clean_recommendation(summary['recommendation'])}"
+        )
+
+    lines.extend(["", "COMPARACIÓN POR CATEGORÍA"])
+    for summary in summaries:
+        values = ", ".join(f"{category.name}: {percent(summary['categories'].get(category.name, 0))}" for category in template.categories)
+        lines.append(f"{candidate_label(aliases.get(summary['id'], ''))}: {values}")
+
+    lines.extend(["", "CRITERIOS EVALUADOS"])
+    for criterion in evaluated_criteria(candidates, criteria):
+        values = []
+        for candidate in candidates:
+            score = score_maps.get(candidate.id, {}).get(criterion.id)
+            values.append(f"{aliases[candidate.id]}={criterion_score_text(criterion, score.score if score else None)}")
+        lines.append(f"{criterion.category} / {criterion.aspect}: {', '.join(values)}")
+
+    lines.extend(["", "LECTURA POR PARTICIPANTE"])
+    criteria_by_id = {criterion.id: criterion for criterion in criteria}
+    for candidate in candidates:
+        summary = next((item for item in summaries if item["id"] == candidate.id), None)
+        lines.append(f"{candidate_label(aliases[candidate.id])} | Resultado global: {percent(summary['global_score']) if summary else 'Pendiente'}")
+        scored = [
+            (score, criteria_by_id.get(score.criterion_id))
+            for score in candidate.scores
+            if criteria_by_id.get(score.criterion_id)
+        ]
+        scored.sort(key=lambda row: row[0].score, reverse=True)
+        strengths = [row for row in scored if row[0].score >= 4][:3]
+        gaps = [row for row in sorted(scored, key=lambda row: row[0].score) if row[0].score < 3][:3]
+        if strengths:
+            lines.append("Aspectos favorables: " + "; ".join(f"{criterion.aspect} ({criterion_score_text(criterion, score.score)})" for score, criterion in strengths))
+        if gaps:
+            lines.append("Puntos a revisar: " + "; ".join(f"{criterion.aspect} ({criterion_score_text(criterion, score.score)})" for score, criterion in gaps))
+        if candidate.comments:
+            lines.append(f"Observación general: {candidate.comments}")
+
+    return "\n".join(lines)
+
+
+def build_template_general_report(template: Template, candidates: list[Candidate], criteria: list[Criterion], narrative: dict | None = None) -> BytesIO:
     styles = make_styles()
     candidates = sorted(candidates, key=lambda candidate: candidate.name)
     aliases = participant_aliases(candidates)
@@ -449,7 +547,7 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     story.extend(category_matrix_story(styles, template, summaries, aliases))
     story.extend(criterion_matrix_story(styles, candidates, criteria, aliases))
     story.extend(participant_profiles_story(styles, candidates, criteria, aliases))
-    story.extend(synthesis_story(styles, template, summaries, preliminary))
+    story.extend(synthesis_story(styles, template, summaries, preliminary, narrative))
     doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     buffer.seek(0)
     return buffer
