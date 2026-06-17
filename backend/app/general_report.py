@@ -183,7 +183,7 @@ class NumberedCanvas(reportlab_canvas.Canvas):
             return
         self.setFont("Helvetica", 7.5)
         self.setFillColor(MUTED)
-        self.drawRightString(letter[0] - 0.72 * inch, 0.37 * inch, f"Página {self._pageNumber} de {total_pages}")
+        self.drawRightString(letter[0] - 0.82 * inch, 0.37 * inch, f"Página {self._pageNumber} de {total_pages}")
 
 
 def make_styles():
@@ -386,21 +386,20 @@ def structure_story(styles, template: Template, criteria: list[Criterion]):
     return story
 
 
-def participant_directory_story(styles, candidates: list[Candidate], aliases: dict[int, str]):
-    story = [Paragraph("Identificación de participantes", styles["H1x"])]
+def participant_reference_block(styles, candidates: list[Candidate], aliases: dict[int, str]):
+    story = [Paragraph("Identificación de participantes", styles["H2x"])]
     if not candidates:
         story.append(Paragraph("No hay participantes registrados para este perfil.", styles["Bodyx"]))
-        story.append(PageBreak())
         return story
     story.append(Paragraph(
-        "Para facilitar la lectura de tablas comparativas donde los participantes aparecen como columnas, el informe utiliza referencias abreviadas. La correspondencia completa se presenta en esta sección.",
+        "Las referencias abreviadas se utilizan únicamente en el cuadro comparativo siguiente, donde los participantes aparecen como columnas.",
         styles["Bodyx"],
     ))
     rows = [[Paragraph("Referencia", styles["TableHeader"]), Paragraph("Participante", styles["TableHeader"])]]
     for candidate in candidates:
         rows.append([Paragraph(aliases[candidate.id], styles["TableCell"]), Paragraph(safe(candidate.name), styles["TableCell"])])
-    story.append(table(rows, [1.2 * inch, 5.1 * inch]))
-    story.append(PageBreak())
+    story.append(table(rows, [1.05 * inch, 5.15 * inch]))
+    story.append(Spacer(1, 0.12 * inch))
     return story
 
 
@@ -470,6 +469,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
     if not evaluated:
         story.append(Paragraph("Aún no hay criterios con puntuaciones registradas para comparar.", styles["Bodyx"]))
         return story
+    story.extend(participant_reference_block(styles, candidates, aliases))
     score_maps: dict[int, dict[int, Score]] = {
         candidate.id: {score.criterion_id: score for score in candidate.scores}
         for candidate in candidates
@@ -488,7 +488,7 @@ def criterion_matrix_story(styles, candidates: list[Candidate], criteria: list[C
                 [Paragraph(safe(criterion.aspect), styles["TableCell"]), Paragraph("Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)), styles["TableCenter"])]
                 + [Paragraph(criterion_score_text(criterion, score_maps[candidate.id].get(criterion.id).score if score_maps[candidate.id].get(criterion.id) else None, "-"), styles["MatrixCell"]) for candidate in candidates]
             )
-        width = 6.65 * inch
+        width = 6.45 * inch
         fixed = 2.55 * inch
         candidate_width = (width - fixed) / max(len(candidates), 1)
         story.append(KeepTogether([Paragraph(safe(category), styles["H2x"]), table(rows, [1.95 * inch, 0.6 * inch] + [candidate_width] * len(candidates)), Spacer(1, 0.09 * inch)]))
@@ -674,17 +674,16 @@ def build_template_general_report(template: Template, candidates: list[Candidate
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=0.72 * inch,
-        leftMargin=0.72 * inch,
-        topMargin=0.68 * inch,
-        bottomMargin=0.82 * inch,
+        rightMargin=0.82 * inch,
+        leftMargin=0.82 * inch,
+        topMargin=0.78 * inch,
+        bottomMargin=0.92 * inch,
         title=f"Reporte general - {template.name}",
     )
     doc.preliminary = preliminary
     doc.generated_at = datetime.now().strftime("%d/%m/%Y · %H:%M")
     story = []
     story.extend(cover_story(styles, template, candidates, preliminary))
-    story.extend(participant_directory_story(styles, candidates, aliases))
     story.extend(structure_story(styles, template, criteria))
     story.extend(ranking_story(styles, template, summaries, preliminary, candidates))
     story.extend(category_matrix_story(styles, template, summaries, candidates))
