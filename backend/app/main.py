@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 import shutil
 import uuid
@@ -16,7 +17,7 @@ from app.ai import candidate_document_signature, create_candidate_context_cache,
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.general_report import build_template_general_report, general_report_source_text
-from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, Score, Template, TemplateCategory, User, UserRole
+from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, GeneralReportNarrativeCache, Score, Template, TemplateCategory, User, UserRole
 from app.reports import build_candidate_report
 from app.schemas import (
     AISettingsIn,
@@ -723,6 +724,50 @@ def get_or_create_candidate_cache(db: Session, candidate: Candidate, api_key: st
     return cache_name
 
 
+def cached_general_report_narrative(db: Session, template_id: int, model: str, source_hash: str) -> dict | None:
+    cached = (
+        db.query(GeneralReportNarrativeCache)
+        .filter(
+            GeneralReportNarrativeCache.template_id == template_id,
+            GeneralReportNarrativeCache.model == model,
+            GeneralReportNarrativeCache.source_hash == source_hash,
+        )
+        .order_by(GeneralReportNarrativeCache.updated_at.desc(), GeneralReportNarrativeCache.id.desc())
+        .first()
+    )
+    if not cached:
+        return None
+    try:
+        payload = json.loads(cached.narrative_json or "{}")
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def save_general_report_narrative(db: Session, template_id: int, model: str, source_hash: str, narrative: dict):
+    cached = (
+        db.query(GeneralReportNarrativeCache)
+        .filter(
+            GeneralReportNarrativeCache.template_id == template_id,
+            GeneralReportNarrativeCache.model == model,
+            GeneralReportNarrativeCache.source_hash == source_hash,
+        )
+        .first()
+    )
+    narrative_json = json.dumps(narrative, ensure_ascii=False)
+    if cached:
+        cached.narrative_json = narrative_json
+    else:
+        db.add(
+            GeneralReportNarrativeCache(
+                template_id=template_id,
+                model=model,
+                source_hash=source_hash,
+                narrative_json=narrative_json,
+            )
+        )
+
+
 def record_ai_interaction(
     db: Session,
     action: str,
@@ -1321,15 +1366,18 @@ def template_general_report(template_id: int, user: User = Depends(require_permi
         .order_by(Candidate.name)
         .all()
     )
-    narrative = None
+    api_key, model = get_ai_config(db)
+    source_text = general_report_source_text(template, candidates, criteria)
+    source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    narrative = cached_general_report_narrative(db, template.id, model, source_hash)
     try:
-        enforce_ai_quota(db, user)
-        api_key, model = get_ai_config(db)
-        source_text = general_report_source_text(template, candidates, criteria)
-        ai_result = generate_general_report_narrative_with_gemini(source_text, api_key, model)
-        record_ai_interaction(db, "general_report_narrative", model, ai_result, user=user, template_id=template.id)
-        db.commit()
-        narrative = ai_result.payload
+        if narrative is None:
+            enforce_ai_quota(db, user)
+            ai_result = generate_general_report_narrative_with_gemini(source_text, api_key, model)
+            record_ai_interaction(db, "general_report_narrative", model, ai_result, user=user, template_id=template.id)
+            narrative = ai_result.payload
+            save_general_report_narrative(db, template.id, model, source_hash, narrative)
+            db.commit()
     except HTTPException:
         db.rollback()
         raise

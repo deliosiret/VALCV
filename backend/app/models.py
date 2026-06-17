@@ -232,6 +232,21 @@ class AIInteractionLog(Base):
     template: Mapped[Template | None] = relationship()
 
 
+class GeneralReportNarrativeCache(Base):
+    __tablename__ = "general_report_narrative_cache"
+    __table_args__ = (UniqueConstraint("template_id", "model", "source_hash", name="uq_general_report_narrative"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("templates.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(120), index=True)
+    source_hash: Mapped[str] = mapped_column(String(80), index=True)
+    narrative_json: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    template: Mapped[Template] = relationship()
+
+
 class AICandidateCache(Base):
     __tablename__ = "ai_candidate_caches"
 
