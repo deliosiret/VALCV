@@ -240,20 +240,16 @@ def add_cover_page(canvas, doc):
     canvas.line(0.72 * inch, height - 1.52 * inch, width - 0.72 * inch, height - 1.52 * inch)
 
     canvas.setFillColor(WHITE)
-    canvas.roundRect(0.72 * inch, 1.22 * inch, width - 1.44 * inch, 5.62 * inch, 12, fill=1, stroke=0)
+    canvas.roundRect(0.55 * inch, 1.02 * inch, width - 1.1 * inch, 6.42 * inch, 12, fill=1, stroke=0)
     canvas.setStrokeColor(colors.HexColor("#dce9e7"))
-    canvas.roundRect(0.72 * inch, 1.22 * inch, width - 1.44 * inch, 5.62 * inch, 12, fill=0, stroke=1)
+    canvas.roundRect(0.55 * inch, 1.02 * inch, width - 1.1 * inch, 6.42 * inch, 12, fill=0, stroke=1)
 
     canvas.setFillColor(colors.HexColor("#fbfdfd"))
-    canvas.roundRect(0.88 * inch, 1.48 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
+    canvas.roundRect(0.78 * inch, 1.42 * inch, 3.05 * inch, 0.72 * inch, 8, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#eaf4f2"))
-    canvas.roundRect(width - 2.15 * inch, 1.48 * inch, 1.45 * inch, 1.45 * inch, 18, fill=1, stroke=0)
+    canvas.roundRect(width - 2.15 * inch, 1.42 * inch, 1.45 * inch, 1.45 * inch, 18, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#dcece9"))
     canvas.circle(width - 0.72 * inch, 0.88 * inch, 0.48 * inch, fill=1, stroke=0)
-
-    canvas.setFont("Helvetica", 7.5)
-    canvas.setFillColor(MUTED)
-    canvas.drawRightString(width - doc.rightMargin, 0.37 * inch, f"Página {doc.page}")
     canvas.restoreState()
 
 
@@ -304,7 +300,7 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
             ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
         story.append(note_box)
-        story.append(Spacer(1, 0.08 * inch))
+        story.append(Spacer(1, 0.18 * inch))
 
     kpis = [
         [Paragraph(str(len(candidates)), styles["CoverKpi"]), Paragraph(str(len(template.categories)), styles["CoverKpi"]), Paragraph(str(len(template.criteria)), styles["CoverKpi"])],
@@ -319,7 +315,7 @@ def cover_story(styles, template: Template, candidates: list[Candidate], prelimi
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
     story.append(kpi_table)
-    story.append(Spacer(1, 0.8 * inch))
+    story.append(Spacer(1, 0.72 * inch))
     footer_card = Table(
         [[
             Paragraph("Documento de apoyo a la decisión", styles["CoverFooterTitle"]),
