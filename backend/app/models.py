@@ -247,6 +247,21 @@ class GeneralReportNarrativeCache(Base):
     template: Mapped[Template] = relationship()
 
 
+class CandidateReportConclusionCache(Base):
+    __tablename__ = "candidate_report_conclusion_cache"
+    __table_args__ = (UniqueConstraint("candidate_id", "model", "source_hash", name="uq_candidate_report_conclusion"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(120), index=True)
+    source_hash: Mapped[str] = mapped_column(String(80), index=True)
+    conclusion_json: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    candidate: Mapped[Candidate] = relationship()
+
+
 class AICandidateCache(Base):
     __tablename__ = "ai_candidate_caches"
 

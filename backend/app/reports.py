@@ -1,25 +1,22 @@
 from __future__ import annotations
 
+import base64
 from collections import defaultdict
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
-from docx import Document
-from docx.enum.section import WD_SECTION
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Cm, Inches, Pt, RGBColor
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from weasyprint import HTML
 
-from app.models import Candidate, Criterion, Template
+from app.models import Candidate, Criterion, Score, Template
 from app.scoring import summarize_candidate
 
 
-BLUE = RGBColor(37, 70, 74)
-TEAL = RGBColor(22, 105, 122)
-LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo-sie.png"
+BASE_DIR = Path(__file__).resolve().parent
+LOGO_PATH = BASE_DIR / "assets" / "logo-sie.png"
+TEMPLATES_DIR = BASE_DIR / "templates"
 
 
 def compact_number(value: float, decimals: int = 2) -> str:
@@ -28,6 +25,10 @@ def compact_number(value: float, decimals: int = 2) -> str:
 
 def percent(value: float) -> str:
     return f"{compact_number((value or 0) * 100)}%"
+
+
+def percent_value(value: float) -> str:
+    return compact_number((value or 0) * 100)
 
 
 def score_text(score: float | None) -> str:
@@ -39,7 +40,7 @@ def report_recommendation(value: str) -> str:
         return "No concluyente"
     if value == "No califica por criterio crítico":
         return "No califica para el perfil"
-    return value
+    return value or "Sin recomendación"
 
 
 def final_decision_text(value: str) -> str:
@@ -48,6 +49,14 @@ def final_decision_text(value: str) -> str:
     if value == "not_qualifies":
         return "No califica"
     return "No definida"
+
+
+def recommendation_tone(value: str) -> str:
+    if value in {"Altamente recomendable", "Recomendable"}:
+        return "good"
+    if value == "Requiere revisión":
+        return "warn"
+    return "bad"
 
 
 def recommendation_scale(summary: dict, template: Template) -> dict[str, float]:
@@ -59,16 +68,6 @@ def recommendation_scale(summary: dict, template: Template) -> dict[str, float]:
     }
 
 
-def recommendation_scale_sentence(summary: dict, template: Template) -> str:
-    scale = recommendation_scale(summary, template)
-    return (
-        "La interpretación de la recomendación utiliza la escala definida para este perfil: "
-        f"Altamente recomendable desde {percent(scale['highly_recommended'])}, "
-        f"Recomendable desde {percent(scale['recommended'])}, "
-        f"Requiere revisión desde {percent(scale['review'])} y No recomendable por debajo de ese valor."
-    )
-
-
 def category_results(template: Template, summary: dict) -> list[tuple[str, float, float]]:
     return [
         (category.name, category.weight, summary["categories"].get(category.name, 0))
@@ -76,316 +75,218 @@ def category_results(template: Template, summary: dict) -> list[tuple[str, float
     ]
 
 
-def set_cell_shading(cell, fill: str) -> None:
-    tc_pr = cell._tc.get_or_add_tcPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:fill"), fill)
-    tc_pr.append(shd)
+def criterion_global_weight(criterion: Criterion) -> float:
+    return 0.0 if criterion.is_critical else float(criterion.global_weight or 0)
 
 
-def set_cell_text(cell, text: str, bold: bool = False, size: float = 9.0) -> None:
-    cell.text = ""
-    paragraph = cell.paragraphs[0]
-    run = paragraph.add_run(text)
-    run.bold = bold
-    run.font.name = "Aptos"
-    run.font.size = Pt(size)
-    paragraph.paragraph_format.space_after = Pt(0)
+def logo_data_uri() -> str | None:
+    if not LOGO_PATH.exists():
+        return None
+    return f"data:image/png;base64,{base64.b64encode(LOGO_PATH.read_bytes()).decode('ascii')}"
 
 
-def configure(document: Document) -> None:
-    section = document.sections[0]
-    section.top_margin = Cm(1.7)
-    section.bottom_margin = Cm(1.7)
-    section.left_margin = Cm(2.0)
-    section.right_margin = Cm(2.0)
-    styles = document.styles
-    styles["Normal"].font.name = "Aptos"
-    styles["Normal"].font.size = Pt(11)
-    for name in ("Title", "Heading 1", "Heading 2"):
-        styles[name].font.name = "Aptos Display"
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run("Superintendencia de Electricidad - Reporte de evaluación curricular")
-    run.font.name = "Aptos"
-    run.font.size = Pt(8)
-    run.font.color.rgb = RGBColor(100, 100, 100)
+def conclusion_paragraphs(conclusion: dict | None) -> list[str]:
+    values = (conclusion or {}).get("conclusion", [])
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
-def heading(document: Document, text: str, level: int = 1):
-    paragraph = document.add_heading(text, level=level)
-    for run in paragraph.runs:
-        run.font.name = "Aptos Display"
-        run.font.color.rgb = BLUE if level == 1 else TEAL
-    return paragraph
-
-
-def body(document: Document, text: str):
-    paragraph = document.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    paragraph.paragraph_format.space_after = Pt(6)
-    paragraph.paragraph_format.line_spacing = 1.08
-    run = paragraph.add_run(text)
-    run.font.name = "Aptos"
-    run.font.size = Pt(11)
-    return paragraph
-
-
-def bullet(document: Document, text: str):
-    paragraph = document.add_paragraph(style="List Bullet")
-    paragraph.paragraph_format.space_after = Pt(3)
-    run = paragraph.add_run(text)
-    run.font.name = "Aptos"
-    run.font.size = Pt(11)
-    return paragraph
-
-
-def add_table(document: Document, headers: list[str], rows: list[list[str]]) -> None:
-    table = document.add_table(rows=1, cols=len(headers))
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.style = "Table Grid"
-    for index, header in enumerate(headers):
-        set_cell_text(table.rows[0].cells[index], header, True)
-        set_cell_shading(table.rows[0].cells[index], "DCECEA")
-    for row in rows:
-        cells = table.add_row().cells
-        for index, value in enumerate(row):
-            set_cell_text(cells[index], value)
-    document.add_paragraph()
-
-
-def add_cover(document: Document, candidate: Candidate, template: Template, summary: dict) -> None:
-    if LOGO_PATH.exists():
-        logo = document.add_paragraph()
-        logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        logo.add_run().add_picture(str(LOGO_PATH), width=Inches(2.4))
-
-    title = document.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title.paragraph_format.space_before = Pt(18)
-    title.paragraph_format.space_after = Pt(8)
-    run = title.add_run("Reporte individual de evaluación curricular")
-    run.bold = True
-    run.font.name = "Aptos Display"
-    run.font.size = Pt(21)
-    run.font.color.rgb = BLUE
-
-    subtitle = document.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run(candidate.name)
-    run.bold = True
-    run.font.name = "Aptos"
-    run.font.size = Pt(14)
-    run.font.color.rgb = TEAL
-
-    rows = [
-        ["Perfil evaluado", template.name],
-        ["Cédula / ID", candidate.document_id or "No registrado"],
-        ["Evaluador asignado", candidate.evaluator or "No registrado"],
-        ["Fecha de generación", datetime.now().strftime("%d/%m/%Y %H:%M")],
-        ["Resultado global", percent(summary["global_score"])],
-        ["Recomendación", report_recommendation(summary["recommendation"])],
-        ["Decisión del evaluador", final_decision_text(candidate.final_decision)],
-    ]
-    add_table(document, ["Dato", "Detalle"], rows)
-
-    body(
-        document,
-        "Este documento resume la evaluación realizada al candidato. Su propósito es apoyar al equipo evaluador en la revisión "
-        "del expediente curricular y facilitar una lectura ordenada de los criterios, evidencias y resultados obtenidos.",
-    )
-    document.add_page_break()
-
-
-def category_narrative(document: Document, template: Template, summary: dict) -> None:
-    heading(document, "Resumen ejecutivo de resultados")
-    body(
-        document,
-        f"El candidato fue evaluado para el perfil \"{template.name}\" y obtuvo un resultado global de "
-        f"{percent(summary['global_score'])}. La recomendación obtenida es: "
-        f"{report_recommendation(summary['recommendation'])}. Este resultado se deriva de los criterios ponderados definidos para el perfil y "
-        "de las puntuaciones registradas durante la revisión del expediente.",
-    )
-    body(document, recommendation_scale_sentence(summary, template))
-    if template.description:
-        body(document, f"Descripción del perfil: {template.description}")
-
-    rows = [[name, percent(weight), percent(result)] for name, weight, result in category_results(template, summary)]
-    if summary.get("bonus_score", 0) > 0:
-        rows.append(["Bonificación adicional", f"Hasta {percent(0.05)}", percent(summary.get("categories", {}).get("Bonificación adicional", 0))])
-    add_table(document, ["Categoría", "Participación en el resultado final", "Resultado del candidato"], rows)
-
-
-def executive_synthesis(document: Document, candidate: Candidate, template: Template, criteria: list[Criterion], summary: dict) -> None:
-    heading(document, "Síntesis ejecutiva")
-    results = sorted(category_results(template, summary), key=lambda row: row[2], reverse=True)
-    scale = recommendation_scale(summary, template)
-    if results:
-        strengths = [name for name, _, result in results[:2] if result >= scale["recommended"]]
-        if strengths:
-            body(
-                document,
-                "Las áreas de mejor desempeño se observan en "
-                + ", ".join(strengths)
-                + ". Estos resultados sugieren una correspondencia favorable entre el expediente revisado y los componentes más sólidos del perfil evaluado.",
-            )
-        else:
-            body(
-                document,
-                "No se identifican categorías con desempeño alto. La lectura del resultado debe concentrarse en las brechas observadas y en la validación técnica posterior.",
-            )
-
-        validation = [name for name, _, result in sorted(results, key=lambda row: row[2])[:2] if result < scale["recommended"]]
-        if validation:
-            body(
-                document,
-                "Los aspectos que conviene validar con mayor atención corresponden a "
-                + ", ".join(validation)
-                + ". Estos puntos pueden ser revisados mediante entrevista, prueba temática o verificación documental adicional, según corresponda.",
-            )
-
-    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
-    pending = [criterion.aspect for criterion in criteria if criterion.id not in score_by_criterion]
-    if pending:
-        body(document, "Se identifican criterios pendientes de evaluación o sin puntuación registrada:")
-        for aspect in pending[:6]:
-            bullet(document, aspect)
-        if len(pending) > 6:
-            body(document, f"Además, existen {len(pending) - 6} criterios adicionales sin evaluación registrada.")
-
-
-def candidate_documents_narrative(document: Document, candidate: Candidate) -> None:
-    if not candidate.files:
-        return
-    heading(document, "Documentación del expediente")
-    body(
-        document,
-        "Para la revisión del candidato se consideraron los documentos cargados en su expediente. Estos soportes forman "
-        "parte de la base documental utilizada para registrar los resultados y comentarios de evaluación.",
-    )
-    for file in candidate.files:
-        bullet(document, file.original_name)
-
-
-def weights_narrative(document: Document, template: Template, criteria: list[Criterion]) -> None:
-    heading(document, "Estructura de evaluación")
-    body(
-        document,
-        "La evaluación se organizó en categorías con distintos niveles de incidencia en el resultado final. "
-        "Dentro de cada categoría se distribuye la valoración entre sus criterios correspondientes.",
-    )
-    grouped: dict[str, list[Criterion]] = defaultdict(list)
-    for criterion in criteria:
-        grouped[criterion.category].append(criterion)
-    for category in template.categories:
-        heading(document, f"{category.name} ({percent(category.weight)})", 2)
-        children = grouped.get(category.name, [])
-        if not children:
-            body(document, "No se registraron criterios en esta categoría.")
-            continue
-        for criterion in children:
-            if criterion.is_critical:
-                bullet(document, f"{criterion.aspect}. Requisito de cumplimiento obligatorio.")
-            else:
-                bullet(document, f"{criterion.aspect}. Participación dentro de la categoría: {percent(criterion.within_category_weight)}.")
-
-
-def evaluation_narrative(document: Document, candidate: Candidate, criteria: list[Criterion]) -> None:
-    heading(document, "Análisis por criterio")
-    body(
-        document,
-        "Esta sección resume los resultados y comentarios registrados para cada criterio evaluado.",
-    )
-    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
-    grouped: dict[str, list[Criterion]] = defaultdict(list)
-    for criterion in criteria:
-        grouped[criterion.category].append(criterion)
-
-    for category, children in grouped.items():
-        heading(document, category, 2)
-        for criterion in children:
-            score = score_by_criterion.get(criterion.id)
-            body(document, f"{criterion.aspect}. Resultado obtenido: {score_text(score.score if score else None)}.")
-            if score and score.rationale:
-                body(document, f"Comentario de evaluación: {score.rationale}")
-            if score and score.evaluator_note:
-                body(document, f"Observación del evaluador: {score.evaluator_note}")
-
-
-def bonus_narrative(document: Document, summary: dict) -> None:
-    if summary.get("bonus_score", 0) <= 0:
-        return
-    heading(document, "Bonificación adicional")
-    body(
-        document,
-        f"Además de los criterios principales, se identificaron elementos adicionales favorables con una valoración de "
-        f"{score_text(summary.get('bonus_score'))}, equivalentes a un impacto global de {percent(summary.get('bonus_amount', 0))}. "
-        "Estos elementos complementan la lectura del perfil sin permitir que el resultado final exceda el 100%.",
-    )
-    if summary.get("bonus_rationale"):
-        body(document, f"Justificación: {summary['bonus_rationale']}")
-
-
-def conclusion_text(summary: dict, template: Template) -> str:
-    if summary["recommendation"] == "No concluyente":
-        return (
+def fallback_conclusion(candidate: Candidate, template: Template, summary: dict) -> list[str]:
+    recommendation = summary["recommendation"]
+    if recommendation == "No concluyente":
+        text = (
             "La evaluación todavía no es concluyente porque existen criterios pendientes de puntuación. "
             "El resultado debe leerse como una referencia preliminar hasta completar la revisión del perfil."
         )
-    if summary["recommendation"] == "No califica por criterio crítico":
-        return (
+    elif recommendation == "No califica por criterio crítico":
+        text = (
             "La evaluación registra al menos un requisito obligatorio no cumplido o no evidenciado para el perfil. "
-            "Esta condición impide que el candidato califique globalmente, aun cuando pueda "
-            "presentar fortalezas parciales en otras categorías."
+            "Esta condición impide que el candidato califique globalmente, aun cuando pueda presentar fortalezas parciales."
         )
-    recommendation = summary["recommendation"]
-    if recommendation == "Altamente recomendable":
-        tone = "El perfil presenta una correspondencia alta con los criterios definidos."
+    elif recommendation == "Altamente recomendable":
+        text = "El perfil presenta una correspondencia alta con los criterios definidos."
     elif recommendation == "Recomendable":
-        tone = "El perfil presenta una correspondencia favorable con los criterios definidos, con aspectos que pueden ser revisados en fases posteriores."
+        text = "El perfil presenta una correspondencia favorable con los criterios definidos, con aspectos que pueden revisarse en fases posteriores."
     elif recommendation == "Requiere revisión":
-        tone = "El perfil requiere revisión adicional para determinar si las brechas observadas pueden ser compensadas por entrevista, examen o validación técnica."
+        text = "El perfil requiere revisión adicional para determinar si las brechas observadas pueden compensarse mediante validación técnica posterior."
     else:
-        tone = "El perfil muestra una correspondencia limitada con los criterios definidos para la vacante evaluada."
-    return (
-        f"{tone} El resultado debe analizarse junto con las evidencias documentales, las observaciones del evaluador y "
-        f"los objetivos específicos del perfil \"{template.name}\"."
-    )
+        text = "El perfil muestra una correspondencia limitada con los criterios definidos para la vacante evaluada."
+    return [
+        f"{text} El resultado debe analizarse junto con las evidencias documentales, las observaciones del evaluador y los objetivos específicos del perfil {template.name}.",
+        (
+            f"Para {candidate.name}, este reporte debe utilizarse como soporte documental. La decisión final corresponde a las instancias humanas competentes, "
+            "considerando expediente, entrevistas, validaciones y demás elementos institucionales aplicables."
+        ),
+    ]
 
 
-def build_candidate_report(candidate: Candidate, template: Template, criteria: list[Criterion]) -> BytesIO:
-    document = Document()
-    configure(document)
+def build_candidate_report_context(
+    candidate: Candidate,
+    template: Template,
+    criteria: list[Criterion],
+    conclusion: dict | None = None,
+) -> dict[str, Any]:
     summary = summarize_candidate(candidate, criteria, template)
+    score_by_criterion: dict[int, Score] = {score.criterion_id: score for score in candidate.scores}
+    scale = recommendation_scale(summary, template)
 
-    add_cover(document, candidate, template, summary)
-    category_narrative(document, template, summary)
-    executive_synthesis(document, candidate, template, criteria, summary)
-    candidate_documents_narrative(document, candidate)
-    weights_narrative(document, template, criteria)
-    document.add_section(WD_SECTION.NEW_PAGE)
-    evaluation_narrative(document, candidate, criteria)
-    bonus_narrative(document, summary)
-
-    heading(document, "Observaciones generales")
-    body(document, candidate.comments or "No se registraron observaciones generales para este candidato.")
-
-    heading(document, "Conclusión")
-    body(document, conclusion_text(summary, template))
-    if candidate.final_decision:
-        body(
-            document,
-            f"La decisión final registrada por el evaluador es: {final_decision_text(candidate.final_decision)}. "
-            "Esta determinación debe leerse como el cierre humano del análisis documentado en el presente reporte.",
+    categories = []
+    for name, weight, result in category_results(template, summary):
+        categories.append(
+            {
+                "name": name,
+                "weight": percent(weight),
+                "result": percent(result),
+                "bar": percent_value(result),
+            }
         )
-    body(
-        document,
-        "Este reporte tiene carácter de soporte documental. La decisión final sobre el proceso de selección corresponde "
-        "a las instancias humanas competentes, considerando el expediente completo, las entrevistas, validaciones y "
-        "demás elementos institucionales aplicables.",
-    )
+    if summary.get("bonus_score", 0) > 0:
+        categories.append(
+            {
+                "name": "Bonificación adicional",
+                "weight": f"Hasta {percent(0.05)}",
+                "result": percent(summary.get("categories", {}).get("Bonificación adicional", 0)),
+                "bar": percent_value(summary.get("categories", {}).get("Bonificación adicional", 0)),
+            }
+        )
 
-    buffer = BytesIO()
-    document.save(buffer)
-    buffer.seek(0)
-    return buffer
+    grouped: dict[str, list[Criterion]] = defaultdict(list)
+    for criterion in criteria:
+        grouped[criterion.category].append(criterion)
+
+    criteria_sections = []
+    evaluated_criteria = 0
+    for category in dict.fromkeys(criterion.category for criterion in criteria):
+        rows = []
+        for criterion in grouped.get(category, []):
+            score = score_by_criterion.get(criterion.id)
+            if score:
+                evaluated_criteria += 1
+            rows.append(
+                {
+                    "aspect": criterion.aspect,
+                    "weight": "Crítico" if criterion.is_critical else percent(criterion_global_weight(criterion)),
+                    "score": score_text(score.score if score else None),
+                    "rationale": score.rationale if score else "",
+                    "note": score.evaluator_note if score else "",
+                }
+            )
+        criteria_sections.append({"category": category, "rows": rows})
+
+    scored = [
+        (score, next((criterion for criterion in criteria if criterion.id == score.criterion_id), None))
+        for score in candidate.scores
+    ]
+    scored = [(score, criterion) for score, criterion in scored if criterion is not None]
+    strengths = [
+        f"{criterion.aspect} ({score_text(score.score)})"
+        for score, criterion in sorted(scored, key=lambda row: row[0].score, reverse=True)
+        if score.score >= 4
+    ][:3]
+    gaps = [
+        f"{criterion.aspect} ({score_text(score.score)})"
+        for score, criterion in sorted(scored, key=lambda row: row[0].score)
+        if score.score < 3
+    ][:3]
+    pending = [criterion.aspect for criterion in criteria if criterion.id not in score_by_criterion]
+
+    paragraphs = conclusion_paragraphs(conclusion) or fallback_conclusion(candidate, template, summary)
+
+    return {
+        "logo_data_uri": logo_data_uri(),
+        "generated_at": datetime.now().strftime("%d/%m/%Y · %H:%M"),
+        "candidate_name": candidate.name,
+        "template_name": template.name,
+        "document_id": candidate.document_id or "No registrado",
+        "evaluator": candidate.evaluator or "No registrado",
+        "final_decision": final_decision_text(candidate.final_decision),
+        "global_score": percent(summary["global_score"]),
+        "global_bar": percent_value(summary["global_score"]),
+        "recommendation": report_recommendation(summary["recommendation"]),
+        "recommendation_tone": recommendation_tone(summary["recommendation"]),
+        "is_preliminary": summary["recommendation"] == "No concluyente",
+        "summary": {
+            "categories": len(template.categories),
+            "criteria": len(criteria),
+            "evaluated_criteria": evaluated_criteria,
+            "documents": len(candidate.files),
+            "pending_criteria": len(pending),
+        },
+        "scale_text": (
+            f"Altamente recomendable desde {percent(scale['highly_recommended'])}; "
+            f"Recomendable desde {percent(scale['recommended'])}; "
+            f"Requiere revisión desde {percent(scale['review'])}."
+        ),
+        "categories": categories,
+        "criteria_sections": criteria_sections,
+        "documents": [file.original_name for file in candidate.files],
+        "strengths": strengths,
+        "gaps": gaps,
+        "pending": pending,
+        "comments": candidate.comments or "",
+        "bonus_score": score_text(summary.get("bonus_score")) if summary.get("bonus_score", 0) > 0 else "",
+        "bonus_amount": percent(summary.get("bonus_amount", 0)),
+        "bonus_rationale": summary.get("bonus_rationale", ""),
+        "conclusion": paragraphs,
+    }
+
+
+def candidate_report_source_text(candidate: Candidate, template: Template, criteria: list[Criterion]) -> str:
+    summary = summarize_candidate(candidate, criteria, template)
+    score_by_criterion = {score.criterion_id: score for score in candidate.scores}
+    lines = [
+        "REPORTE INDIVIDUAL DE EVALUACIÓN CURRICULAR",
+        f"Candidato: {candidate.name}",
+        f"Perfil evaluado: {template.name}",
+        f"Cédula / ID: {candidate.document_id or 'No registrado'}",
+        f"Evaluador asignado: {candidate.evaluator or 'No registrado'}",
+        f"Resultado global: {percent(summary['global_score'])}",
+        f"Recomendación: {report_recommendation(summary['recommendation'])}",
+        f"Decisión del evaluador: {final_decision_text(candidate.final_decision)}",
+        f"Observaciones generales: {candidate.comments or 'No registradas'}",
+        "",
+        "RESULTADOS POR CATEGORÍA",
+    ]
+    for name, weight, result in category_results(template, summary):
+        lines.append(f"{name}: peso {percent(weight)}, resultado {percent(result)}")
+    if summary.get("bonus_score", 0) > 0:
+        lines.append(
+            f"Bonificación adicional: {score_text(summary.get('bonus_score'))}; impacto global {percent(summary.get('bonus_amount', 0))}; "
+            f"justificación {summary.get('bonus_rationale', '')}"
+        )
+
+    lines.extend(["", "CRITERIOS"])
+    for criterion in criteria:
+        score = score_by_criterion.get(criterion.id)
+        lines.append(
+            f"{criterion.category} / {criterion.aspect}: peso {'crítico' if criterion.is_critical else percent(criterion_global_weight(criterion))}; "
+            f"resultado {score_text(score.score if score else None)}"
+        )
+        if score and score.rationale:
+            lines.append(f"Comentario de evaluación: {score.rationale}")
+        if score and score.evaluator_note:
+            lines.append(f"Observación del evaluador: {score.evaluator_note}")
+
+    lines.extend(["", "DOCUMENTOS"])
+    if candidate.files:
+        for file in candidate.files:
+            lines.append(file.original_name)
+    else:
+        lines.append("No se registraron documentos.")
+    return "\n".join(lines)
+
+
+def build_candidate_report(
+    candidate: Candidate,
+    template: Template,
+    criteria: list[Criterion],
+    conclusion: dict | None = None,
+) -> BytesIO:
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=select_autoescape(["html", "xml", "j2"]),
+    )
+    tpl = env.get_template("candidate_report.html.j2")
+    html = tpl.render(**build_candidate_report_context(candidate, template, criteria, conclusion))
+    return BytesIO(HTML(string=html, base_url=str(TEMPLATES_DIR)).write_pdf())

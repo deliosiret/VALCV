@@ -361,6 +361,39 @@ def generate_general_report_narrative_with_gemini(
     return gemini_result(model, prompt, response)
 
 
+def generate_candidate_report_conclusion_with_gemini(
+    report_source_text: str,
+    api_key: str | None,
+    model: str,
+) -> GeminiCallResult:
+    if not api_key:
+        raise RuntimeError("Configura la API key de Gemini antes de generar la conclusión del reporte.")
+    if not report_source_text.strip():
+        raise RuntimeError("No hay contenido suficiente para generar la conclusión del reporte.")
+
+    client = genai.Client(api_key=api_key)
+    prompt = (
+        "Redacta la conclusión ejecutiva de un reporte individual de evaluación curricular. "
+        "Usa exclusivamente el contenido estructurado del reporte que se suministra más abajo. "
+        "No inventes datos, puntuaciones, documentos, decisiones, experiencia ni credenciales. "
+        "No uses lenguaje técnico sobre la plataforma, plantillas, IA, prompts, logs o automatización. "
+        "Integra el resultado global, la recomendación, los criterios fuertes, las brechas, los pendientes y las observaciones disponibles. "
+        "Si la evaluación está incompleta, expresa claramente que la valoración no es concluyente y que debe completarse antes del cierre. "
+        "Mantén un tono profesional, institucional, sobrio y útil para Recursos Humanos y el área técnica. "
+        "Devuelve únicamente JSON válido con la forma "
+        '{"conclusion":["párrafo 1","párrafo 2","párrafo 3"]}. '
+        "Cada párrafo debe tener entre 45 y 90 palabras. "
+        f"Contenido completo del reporte:\n{report_source_text}"
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+        config=generate_config(model),
+    )
+    return gemini_result(model, prompt, response)
+
+
 def generate_template_with_gemini(
     requirements_text: str,
     file_name: str | None,

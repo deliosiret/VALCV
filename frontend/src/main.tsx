@@ -1333,7 +1333,7 @@ function App() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `reporte_evaluacion_${selectedCandidate.name.replace(/[^a-z0-9]+/gi, "_")}.docx`;
+      link.download = `reporte_evaluacion_${selectedCandidate.name.replace(/[^a-z0-9]+/gi, "_")}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -2865,7 +2865,7 @@ function App() {
                   <button className={`${buttonClass} bg-[#9a3412]`} onClick={resetCandidateEvaluation} disabled={busy || !canEvaluateCandidates} title="Limpiar evaluación">
                     <RotateCcw size={18} /> Limpiar
                   </button>
-                  <button className={`${buttonClass} bg-[#486366]`} onClick={downloadCandidateReport} disabled={busy} title="Generar reporte en Word">
+                  <button className={`${buttonClass} bg-[#486366]`} onClick={downloadCandidateReport} disabled={busy} title="Generar reporte individual en PDF">
                     <FileText size={18} /> Reporte
                   </button>
                 </div>

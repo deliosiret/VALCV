@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Reporte individual de evaluación curricular</title>
+    <style>
+      @page cover {
+        size: Letter;
+        margin: 0.25in 0.25in 0.65in 0.25in;
+        @top-left { content: ""; }
+        @top-center { content: ""; }
+        @top-right { content: ""; }
+        @bottom-left { content: ""; }
+        @bottom-center { content: ""; }
+        @bottom-right { content: ""; }
+      }
+
+      @page {
+        size: Letter;
+        margin: 1.05in 0.55in 0.75in 0.55in;
+        @top-left { content: element(header); width: 100%; }
+        @top-center { content: ""; }
+        @top-right { content: ""; }
+        @bottom-left { content: element(footer); width: 100%; }
+        @bottom-center { content: ""; }
+        @bottom-right { content: ""; }
+      }
+
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #dbe4ee;
+        --line-strong: #c6d4e1;
+        --paper: #ffffff;
+        --bg-soft: #f8fafc;
+        --bg-panel: #eef4f8;
+        --blue: #3a506b;
+        --blue-deep: #163c48;
+        --teal: #0b7285;
+        --aqua: #5bc0be;
+        --gold: #d69b2d;
+        --red: #b91c1c;
+        --red-soft: #fff1ed;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        color: var(--ink);
+        font-family: DejaVu Sans, Arial, sans-serif;
+        font-size: 10.5px;
+        line-height: 1.45;
+        background: var(--paper);
+      }
+      h1, h2, h3, p { margin: 0; }
+      p + p { margin-top: 6px; }
+
+      .header {
+        position: running(header);
+        width: 100%;
+        padding: 8px 0 10px;
+        border-bottom: 2px solid var(--aqua);
+      }
+      .header-row, .footer-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        width: 100%;
+      }
+      .header-logo { height: 44px; width: auto; display: block; }
+      .header-title { text-align: right; color: var(--blue); font-size: 15px; font-weight: 800; }
+      .header-sub { margin-top: 1px; color: var(--muted); font-size: 10px; }
+      .footer {
+        position: running(footer);
+        width: 100%;
+        padding-top: 6px;
+        border-top: 1px solid #cbd5e1;
+        color: var(--muted);
+        font-size: 9px;
+      }
+      .footer-page::after { content: "Página " counter(page) " de " counter(pages); }
+
+      .cover {
+        page: cover;
+        min-height: 10.1in;
+        text-align: center;
+        page-break-after: always;
+      }
+      .cover-band {
+        width: 100%;
+        height: 0.64in;
+        background: var(--blue-deep);
+        border-bottom: 0.08in solid var(--aqua);
+      }
+      .cover-logo-wrap {
+        margin-top: 0.38in;
+        padding-left: 0.55in;
+        padding-right: 0.55in;
+      }
+      .cover-logo-box {
+        display: inline-block;
+        min-width: 2.65in;
+        min-height: 0.88in;
+        padding: 0.12in 0.22in;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #ffffff;
+      }
+      .cover-logo-box img { max-width: 2.15in; max-height: 0.72in; display: block; }
+      .cover-org {
+        margin-top: 0.32in;
+        color: var(--teal);
+        font-weight: 800;
+        font-size: 11px;
+        line-height: 1.35;
+      }
+      .cover-expediente {
+        margin-top: 0.12in;
+        color: #111827;
+        font-family: DejaVu Serif, Georgia, serif;
+        font-size: 14px;
+      }
+      .cover-report-block {
+        margin-top: 0.42in;
+        padding-left: 0.7in;
+        padding-right: 0.7in;
+      }
+      .cover-report-mark {
+        color: var(--blue-deep);
+        font-size: 15px;
+        font-weight: 900;
+        line-height: 1.35;
+      }
+      .cover-main {
+        margin-top: 0.06in;
+        color: var(--blue-deep);
+        font-size: 20px;
+        line-height: 1.32;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+      .cover-profile {
+        margin-top: 0.48in;
+        color: var(--teal);
+        font-weight: 800;
+        font-size: 13px;
+        padding-left: 0.55in;
+        padding-right: 0.55in;
+      }
+      .cover-summary {
+        display: table;
+        width: 5.9in;
+        margin: 0.32in auto 0;
+        border-spacing: 0.08in 0;
+        table-layout: fixed;
+      }
+      .cover-stat {
+        display: table-cell;
+        width: 25%;
+        height: 0.58in;
+        padding: 0.1in 0.08in;
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--aqua);
+        text-align: center;
+        vertical-align: middle;
+      }
+      .cover-stat:nth-child(2) { border-top-color: var(--gold); }
+      .cover-stat:nth-child(3) { border-top-color: var(--blue); }
+      .cover-stat:nth-child(4) { border-top-color: var(--teal); }
+      .cover-stat .v { color: var(--teal); font-size: 18px; line-height: 1; font-weight: 900; }
+      .cover-stat .k {
+        margin-top: 0.04in;
+        color: var(--muted);
+        font-size: 7.7px;
+        line-height: 1.15;
+        min-height: 0.22in;
+      }
+      .cover-meta {
+        margin: 2.05in auto 0;
+        width: 4.6in;
+        padding: 0.1in 0;
+        color: var(--muted);
+        font-size: 9.5px;
+        line-height: 1.45;
+      }
+      .cover-meta strong { color: var(--ink); }
+
+      .eyebrow {
+        color: var(--teal);
+        font-weight: 800;
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .section { break-before: page; }
+      .section:first-of-type { break-before: auto; }
+      h1 { margin: 0 0 9px; color: var(--blue); font-size: 15px; line-height: 1.2; page-break-after: avoid; }
+      h2 { margin: 14px 0 7px; color: var(--blue-deep); font-size: 12px; line-height: 1.25; page-break-after: avoid; }
+      h3 { margin: 11px 0 5px; color: var(--blue-deep); font-size: 10.5px; line-height: 1.25; page-break-after: avoid; }
+      .lead { margin-bottom: 10px; color: var(--muted); font-size: 10px; }
+
+      .intro-shell {
+        margin-top: 2px;
+        display: table;
+        width: 100%;
+        border-spacing: 8px;
+      }
+      .intro-main, .intro-side {
+        display: table-cell;
+        vertical-align: top;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .intro-main {
+        width: 63%;
+        padding: 15px 15px 13px;
+        background: linear-gradient(180deg, #fbfdff 0%, #eef5f8 100%);
+      }
+      .intro-title { margin-top: 4px; color: var(--blue); font-size: 20px; line-height: 1.1; font-weight: 900; }
+      .intro-copy { margin-top: 8px; color: var(--muted); }
+      .intro-side { width: 37%; background: #fbfdff; }
+      .side-head { padding: 11px 12px; background: var(--blue); color: #ffffff; }
+      .side-title { font-size: 12px; font-weight: 900; }
+      .side-sub { margin-top: 2px; color: rgba(255,255,255,0.8); font-size: 8px; }
+      .side-body { padding: 9px 12px 12px; }
+      .side-item + .side-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .k {
+        color: var(--muted);
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .v { margin-top: 2px; color: var(--ink); font-weight: 800; }
+      .hint { margin-top: 2px; color: var(--muted); font-size: 7.8px; }
+
+      .kpi-grid {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+        border-spacing: 8px 0;
+        margin: 12px 0 12px;
+      }
+      .kpi-card { display: table-cell; width: 25%; vertical-align: top; }
+      .kpi-card-shell {
+        height: 0.98in;
+        position: relative;
+        padding: 10px 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+      }
+      .kpi-card .k { height: 20px; line-height: 1.18; }
+      .kpi-card .v { margin-top: 6px; color: var(--teal); font-size: 20px; line-height: 1; font-weight: 900; }
+      .kpi-card .v.recommendation-value { font-size: 11px; line-height: 1.15; min-height: 0.28in; }
+      .kpi-card .sub { margin-top: 5px; color: var(--muted); font-size: 7.7px; line-height: 1.25; height: 0.3in; overflow: hidden; }
+      .kpi-card .accent { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--aqua); }
+      .kpi-card:nth-child(2) .accent { background: var(--gold); }
+      .kpi-card:nth-child(3) .accent { background: var(--blue); }
+      .kpi-card:nth-child(4) .accent { background: var(--teal); }
+
+      .panel {
+        margin: 10px 0 12px;
+        padding: 12px 13px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg-soft);
+        break-inside: avoid;
+      }
+      table { width: 100%; border-collapse: collapse; margin: 7px 0 12px; page-break-inside: auto; }
+      tr { page-break-inside: avoid; }
+      th {
+        padding: 6px 7px;
+        border: 1px solid var(--line-strong);
+        background: var(--bg-panel);
+        color: var(--blue);
+        font-size: 8px;
+        line-height: 1.25;
+        text-align: center;
+      }
+      td {
+        padding: 6px 7px;
+        border: 1px solid var(--line);
+        vertical-align: top;
+        font-size: 8.2px;
+        line-height: 1.32;
+      }
+      .center { text-align: center; }
+      .right { text-align: right; }
+      .muted { color: var(--muted); }
+      .nowrap { white-space: nowrap; }
+      .bar-shell { height: 8px; border-radius: 999px; overflow: hidden; background: #e8f2f0; }
+      .bar-fill { height: 8px; border-radius: 999px; background: var(--teal); }
+      .tone-good { color: var(--teal); font-weight: 800; }
+      .tone-warn { color: var(--gold); font-weight: 800; }
+      .tone-bad { color: var(--red); font-weight: 800; }
+      .note {
+        margin: 8px 0 10px;
+        padding: 9px 11px;
+        border: 1px solid #f0d7c5;
+        border-radius: 7px;
+        background: var(--red-soft);
+        color: var(--red);
+      }
+      .bullet-list { margin: 7px 0 0 15px; padding: 0; }
+      li { margin-bottom: 3px; }
+      .profile-grid { display: block; }
+      .profile {
+        margin-bottom: 9px;
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #ffffff;
+        break-inside: avoid;
+      }
+      .conclusion-card {
+        margin-top: 10px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--gold);
+        border-radius: 7px;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="cover">
+      <div class="cover-band"></div>
+      <div class="cover-logo-wrap">
+        <div class="cover-logo-box">
+          {% if logo_data_uri %}
+            <img src="{{ logo_data_uri }}" alt="SIE" />
+          {% endif %}
+        </div>
+      </div>
+      <div class="cover-org">
+        Superintendencia de Electricidad<br />
+        Sistema de Evaluación Curricular
+      </div>
+      <div class="cover-expediente">Reporte individual · {{ generated_at }}</div>
+      <div class="cover-report-block">
+        <div class="cover-report-mark">Reporte Individual de Evaluación Curricular</div>
+        <div class="cover-main">{{ candidate_name }}</div>
+      </div>
+      <div class="cover-profile">{{ template_name }}</div>
+      <div class="cover-summary">
+        <div class="cover-stat"><div class="v">{{ global_score }}</div><div class="k">Resultado global</div></div>
+        <div class="cover-stat"><div class="v">{{ summary.evaluated_criteria }}</div><div class="k">Criterios evaluados</div></div>
+        <div class="cover-stat"><div class="v">{{ summary.criteria }}</div><div class="k">Criterios definidos</div></div>
+        <div class="cover-stat"><div class="v">{{ summary.documents }}</div><div class="k">Documentos</div></div>
+      </div>
+      <div class="cover-meta">
+        <div><strong>{{ recommendation }}</strong></div>
+        <div>Documento de apoyo a la decisión · Uso institucional</div>
+      </div>
+    </section>
+
+    <div class="header">
+      <div class="header-row">
+        <div>{% if logo_data_uri %}<img class="header-logo" src="{{ logo_data_uri }}" alt="SIE" />{% endif %}</div>
+        <div>
+          <div class="header-title">Reporte individual de evaluación curricular</div>
+          <div class="header-sub">{{ candidate_name }} · {{ generated_at }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="footer-row">
+        <div>Reporte individual de evaluación curricular · Uso institucional</div>
+        <div class="footer-page"></div>
+      </div>
+    </div>
+
+    <section>
+      <div class="intro-shell">
+        <div class="intro-main">
+          <div class="eyebrow">Documento para revisión individual</div>
+          <div class="intro-title">{{ candidate_name }}</div>
+          <div class="intro-copy">
+            Presenta el resultado individual, las categorías evaluadas, los criterios registrados, la documentación asociada y una conclusión generada para apoyar la revisión del perfil.
+          </div>
+        </div>
+        <div class="intro-side">
+          <div class="side-head">
+            <div class="side-title">Ficha del candidato</div>
+            <div class="side-sub">Parámetros de esta generación.</div>
+          </div>
+          <div class="side-body">
+            <div class="side-item"><div class="k">Perfil evaluado</div><div class="v">{{ template_name }}</div></div>
+            <div class="side-item"><div class="k">Cédula / ID</div><div class="v">{{ document_id }}</div></div>
+            <div class="side-item"><div class="k">Evaluador</div><div class="v">{{ evaluator }}</div></div>
+            <div class="side-item"><div class="k">Decisión registrada</div><div class="v">{{ final_decision }}</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="kpi-card-shell"><div class="k">Resultado global</div><div class="v">{{ global_score }}</div><div class="sub">Suma ponderada de la evaluación registrada.</div><div class="accent"></div></div></div>
+        <div class="kpi-card"><div class="kpi-card-shell"><div class="k">Recomendación</div><div class="v recommendation-value tone-{{ recommendation_tone }}">{{ recommendation }}</div><div class="sub">Lectura según escala del perfil.</div><div class="accent"></div></div></div>
+        <div class="kpi-card"><div class="kpi-card-shell"><div class="k">Criterios evaluados</div><div class="v">{{ summary.evaluated_criteria }}</div><div class="sub">Criterios con puntuación registrada.</div><div class="accent"></div></div></div>
+        <div class="kpi-card"><div class="kpi-card-shell"><div class="k">Pendientes</div><div class="v">{{ summary.pending_criteria }}</div><div class="sub">Criterios sin puntuación registrada.</div><div class="accent"></div></div></div>
+      </div>
+
+      {% if is_preliminary %}
+      <div class="note">
+        <strong>Nota de alcance.</strong> Esta valoración es preliminar porque existen criterios pendientes. La conclusión debe leerse como una fotografía de avance.
+      </div>
+      {% endif %}
+
+      <div class="panel">
+        <div class="eyebrow">Escala de lectura</div>
+        <p>{{ scale_text }}</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h1>Resumen por categoría</h1>
+      <p class="lead">Se muestra el resultado del candidato por cada categoría configurada en el perfil.</p>
+      <table>
+        <thead>
+          <tr><th>Categoría</th><th>Peso</th><th>Resultado</th><th>Visual</th></tr>
+        </thead>
+        <tbody>
+          {% for category in categories %}
+          <tr>
+            <td>{{ category.name }}</td>
+            <td class="center nowrap">{{ category.weight }}</td>
+            <td class="center nowrap">{{ category.result }}</td>
+            <td><div class="bar-shell"><div class="bar-fill" style="width: {{ category.bar }}%;"></div></div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="profile">
+        <div class="eyebrow">Lectura ejecutiva</div>
+        {% if strengths %}
+          <h3>Aspectos favorables observados</h3>
+          <ul class="bullet-list">{% for item in strengths %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% else %}
+          <p class="muted">No se identifican todavía criterios con puntuación alta registrada.</p>
+        {% endif %}
+        {% if gaps %}
+          <h3>Puntos a revisar o fortalecer</h3>
+          <ul class="bullet-list">{% for item in gaps %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% if pending %}
+          <h3>Criterios pendientes</h3>
+          <ul class="bullet-list">{% for item in pending[:8] %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="section">
+      <h1>Análisis por criterio</h1>
+      {% for section in criteria_sections %}
+      <h2>{{ section.category }}</h2>
+      <table>
+        <thead>
+          <tr><th>Criterio</th><th>Peso</th><th>Resultado</th></tr>
+        </thead>
+        <tbody>
+          {% for row in section.rows %}
+          <tr>
+            <td>
+              <strong>{{ row.aspect }}</strong>
+              {% if row.rationale %}<p class="muted">{{ row.rationale }}</p>{% endif %}
+              {% if row.note %}<p class="muted">Observación: {{ row.note }}</p>{% endif %}
+            </td>
+            <td class="center nowrap">{{ row.weight }}</td>
+            <td class="center nowrap">{{ row.score }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endfor %}
+    </section>
+
+    <section class="section">
+      <h1>Documentación y observaciones</h1>
+      <div class="panel">
+        <div class="eyebrow">Documentos del expediente</div>
+        {% if documents %}
+          <ul class="bullet-list">{% for document in documents %}<li>{{ document }}</li>{% endfor %}</ul>
+        {% else %}
+          <p>No se registraron documentos para este candidato.</p>
+        {% endif %}
+      </div>
+      {% if bonus_score %}
+      <div class="panel">
+        <div class="eyebrow">Bonificación adicional</div>
+        <p>Valoración: <strong>{{ bonus_score }}</strong>. Impacto global: <strong>{{ bonus_amount }}</strong>.</p>
+        {% if bonus_rationale %}<p>{{ bonus_rationale }}</p>{% endif %}
+      </div>
+      {% endif %}
+      <div class="panel">
+        <div class="eyebrow">Observaciones generales</div>
+        <p>{{ comments or "No se registraron observaciones generales para este candidato." }}</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h1>Conclusión</h1>
+      <div class="conclusion-card">
+        {% for paragraph in conclusion %}
+          <p>{{ paragraph }}</p>
+        {% endfor %}
+      </div>
+    </section>
+  </body>
+</html>

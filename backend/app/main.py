@@ -13,12 +13,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_general_report_narrative_with_gemini, generate_template_with_gemini
+from app.ai import candidate_document_signature, create_candidate_context_cache, evaluate_candidate_bonus_with_gemini, evaluate_candidate_with_gemini, generate_candidate_report_conclusion_with_gemini, generate_general_report_narrative_with_gemini, generate_template_with_gemini
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.general_report import build_template_general_report, general_report_source_text
-from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, Criterion, EvaluationMode, GeneralReportNarrativeCache, Score, Template, TemplateCategory, User, UserRole
-from app.reports import build_candidate_report
+from app.models import AICandidateCache, AIInteractionLog, AppSetting, AuthSession, Candidate, CandidateFile, CandidateReportConclusionCache, Criterion, EvaluationMode, GeneralReportNarrativeCache, Score, Template, TemplateCategory, User, UserRole
+from app.reports import build_candidate_report, candidate_report_source_text
 from app.schemas import (
     AISettingsIn,
     AISettingsOut,
@@ -768,6 +768,50 @@ def save_general_report_narrative(db: Session, template_id: int, model: str, sou
         )
 
 
+def cached_candidate_report_conclusion(db: Session, candidate_id: int, model: str, source_hash: str) -> dict | None:
+    cached = (
+        db.query(CandidateReportConclusionCache)
+        .filter(
+            CandidateReportConclusionCache.candidate_id == candidate_id,
+            CandidateReportConclusionCache.model == model,
+            CandidateReportConclusionCache.source_hash == source_hash,
+        )
+        .order_by(CandidateReportConclusionCache.updated_at.desc(), CandidateReportConclusionCache.id.desc())
+        .first()
+    )
+    if not cached:
+        return None
+    try:
+        payload = json.loads(cached.conclusion_json or "{}")
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def save_candidate_report_conclusion(db: Session, candidate_id: int, model: str, source_hash: str, conclusion: dict):
+    cached = (
+        db.query(CandidateReportConclusionCache)
+        .filter(
+            CandidateReportConclusionCache.candidate_id == candidate_id,
+            CandidateReportConclusionCache.model == model,
+            CandidateReportConclusionCache.source_hash == source_hash,
+        )
+        .first()
+    )
+    conclusion_json = json.dumps(conclusion, ensure_ascii=False)
+    if cached:
+        cached.conclusion_json = conclusion_json
+    else:
+        db.add(
+            CandidateReportConclusionCache(
+                candidate_id=candidate_id,
+                model=model,
+                source_hash=source_hash,
+                conclusion_json=conclusion_json,
+            )
+        )
+
+
 def record_ai_interaction(
     db: Session,
     action: str,
@@ -1332,7 +1376,7 @@ def view_candidate_file(candidate_id: int, file_id: int, token: str = Query(...)
 
 
 @app.get("/candidates/{candidate_id}/report")
-def candidate_report(candidate_id: int, _: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
+def candidate_report(candidate_id: int, user: User = Depends(require_permission("view_results")), db: Session = Depends(get_db)):
     candidate = get_candidate_or_404(db, candidate_id)
     template = get_template_or_404(db, candidate.template_id)
     criteria = (
@@ -1341,11 +1385,29 @@ def candidate_report(candidate_id: int, _: User = Depends(require_permission("vi
         .order_by(Criterion.order_index)
         .all()
     )
-    report = build_candidate_report(candidate, template, criteria)
-    filename = f"reporte_evaluacion_{safe_filename(candidate.name)}.docx"
+    api_key, model = get_ai_config(db)
+    source_text = candidate_report_source_text(candidate, template, criteria)
+    source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    conclusion = cached_candidate_report_conclusion(db, candidate.id, model, source_hash)
+    try:
+        if conclusion is None:
+            enforce_ai_quota(db, user)
+            ai_result = generate_candidate_report_conclusion_with_gemini(source_text, api_key, model)
+            record_ai_interaction(db, "candidate_report_conclusion", model, ai_result, user=user, candidate_id=candidate.id, template_id=template.id)
+            conclusion = ai_result.payload
+            save_candidate_report_conclusion(db, candidate.id, model, source_hash, conclusion)
+            db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="No se pudo generar la conclusión del reporte individual con IA.")
+    report = build_candidate_report(candidate, template, criteria, conclusion)
+    filename = f"reporte_evaluacion_{safe_filename(candidate.name)}.pdf"
     return StreamingResponse(
         report,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
